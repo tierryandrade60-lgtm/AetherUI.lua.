@@ -1,0 +1,1027 @@
+--[[
+	AetherUI v1.0.0
+	UI Library minimalista para Roblox (Luau) - um unico ModuleScript.
+
+	Recursos:
+	  - Janela com titulo, botao X (fechar) e botao - (minimizar)
+	  - Minimizar transforma a janela em uma bola flutuante arrastavel
+	  - Clicar na bola reabre a janela com animacao
+	  - Sistema de abas
+	  - Componentes: Button, Toggle, Slider
+	  - Responsivo (PC e mobile) e animado
+
+	Uso: coloque este arquivo como ModuleScript (ex.: ReplicatedStorage.AetherUI)
+	e chame-o a partir de um LocalScript. Exemplo no final do arquivo.
+]]
+
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+
+local AetherUI = {}
+AetherUI.Version = "1.0.0"
+
+local Window = {}
+Window.__index = Window
+
+local Tab = {}
+Tab.__index = Tab
+
+----------------------------------------------------------------
+-- Tema e constantes
+----------------------------------------------------------------
+local Theme = {
+	Background = Color3.fromRGB(22, 22, 28),
+	Surface = Color3.fromRGB(30, 30, 38),
+	Element = Color3.fromRGB(40, 40, 50),
+	ElementHover = Color3.fromRGB(52, 52, 64),
+	Off = Color3.fromRGB(68, 68, 84),
+	Accent = Color3.fromRGB(124, 92, 255),
+	Text = Color3.fromRGB(240, 240, 248),
+	SubText = Color3.fromRGB(150, 150, 168),
+	Danger = Color3.fromRGB(235, 87, 87),
+	Font = Enum.Font.GothamMedium,
+	FontBold = Enum.Font.GothamBold,
+}
+
+local Anim = {
+	Fast = 0.15,
+	Normal = 0.25,
+	Slow = 0.4,
+}
+
+----------------------------------------------------------------
+-- Utilitarios
+----------------------------------------------------------------
+local function create(className, props, children)
+	local instance = Instance.new(className)
+	if instance:IsA("GuiObject") then
+		instance.BorderSizePixel = 0
+	end
+	local parent = nil
+	for key, value in pairs(props or {}) do
+		if key == "Parent" then
+			parent = value
+		else
+			instance[key] = value
+		end
+	end
+	for _, child in ipairs(children or {}) do
+		child.Parent = instance
+	end
+	if parent then
+		instance.Parent = parent
+	end
+	return instance
+end
+
+local function tween(object, duration, properties, style, direction)
+	local info = TweenInfo.new(
+		duration,
+		style or Enum.EasingStyle.Quint,
+		direction or Enum.EasingDirection.Out
+	)
+	local t = TweenService:Create(object, info, properties)
+	t:Play()
+	return t
+end
+
+local function addCorner(parent, radius)
+	return create("UICorner", { CornerRadius = UDim.new(0, radius), Parent = parent })
+end
+
+local function addPadding(parent, left, top, right, bottom)
+	return create("UIPadding", {
+		PaddingLeft = UDim.new(0, left),
+		PaddingTop = UDim.new(0, top),
+		PaddingRight = UDim.new(0, right),
+		PaddingBottom = UDim.new(0, bottom),
+		Parent = parent,
+	})
+end
+
+local function safeCall(callback, ...)
+	if typeof(callback) ~= "function" then
+		return
+	end
+	local ok, err = pcall(callback, ...)
+	if not ok then
+		warn("[AetherUI] Erro em callback: " .. tostring(err))
+	end
+end
+
+local function isPointer(input)
+	return input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch
+end
+
+local function getViewport()
+	local camera = workspace.CurrentCamera
+	if camera then
+		return camera.ViewportSize
+	end
+	return Vector2.new(1280, 720)
+end
+
+local function getMetrics()
+	local mobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+	return {
+		Mobile = mobile,
+		Row = mobile and 42 or 36,
+		Title = mobile and 44 or 40,
+		TabBar = mobile and 42 or 36,
+		Text = mobile and 15 or 14,
+		Ball = mobile and 56 or 48,
+		TitleButton = mobile and 32 or 28,
+	}
+end
+
+local function getWindowSize()
+	local viewport = getViewport()
+	local width = math.clamp(math.floor(viewport.X * 0.92), 260, 520)
+	local height = math.clamp(math.floor(viewport.Y * 0.78), 240, 360)
+	return UDim2.fromOffset(width, height)
+end
+
+-- Mantem a janela inteira dentro da tela (posicao com AnchorPoint 0.5, 0.5).
+local function clampWindowPosition(position, size)
+	local viewport = getViewport()
+	local halfW = size.X.Offset / 2
+	local halfH = size.Y.Offset / 2
+	local cx = position.X.Scale * viewport.X + position.X.Offset
+	local cy = position.Y.Scale * viewport.Y + position.Y.Offset
+	local nx = math.clamp(cx, math.min(halfW, viewport.X / 2), math.max(viewport.X - halfW, viewport.X / 2))
+	local ny = math.clamp(cy, math.min(halfH, viewport.Y / 2), math.max(viewport.Y - halfH, viewport.Y / 2))
+	return UDim2.new(
+		position.X.Scale,
+		position.X.Offset + (nx - cx),
+		position.Y.Scale,
+		position.Y.Offset + (ny - cy)
+	)
+end
+
+-- Mantem a bola dentro da tela (posicao em offset, AnchorPoint 0.5, 0.5).
+local function clampBallPosition(position, diameter)
+	local viewport = getViewport()
+	local r = diameter / 2 + 4
+	return UDim2.fromOffset(
+		math.clamp(position.X.Offset, r, math.max(viewport.X - r, r)),
+		math.clamp(position.Y.Offset, r, math.max(viewport.Y - r, r))
+	)
+end
+
+-- Arrasto generico (mouse e toque). Distingue clique de arrasto (limite de 5 px).
+-- options: Clamp(position) -> position, OnClick(), OnDragEnd()
+local function makeDraggable(handle, target, connections, options)
+	options = options or {}
+	local dragging = false
+	local moved = false
+	local activeInput = nil
+	local startPointer = Vector2.zero
+	local startPosition = target.Position
+
+	table.insert(connections, handle.InputBegan:Connect(function(input)
+		if dragging or not isPointer(input) then
+			return
+		end
+		dragging = true
+		moved = false
+		activeInput = input
+		startPointer = Vector2.new(input.Position.X, input.Position.Y)
+		startPosition = target.Position
+	end))
+
+	table.insert(connections, UserInputService.InputChanged:Connect(function(input)
+		if not dragging then
+			return
+		end
+		local isMove = input.UserInputType == Enum.UserInputType.MouseMovement
+			or (input.UserInputType == Enum.UserInputType.Touch and input == activeInput)
+		if not isMove then
+			return
+		end
+		local delta = Vector2.new(input.Position.X, input.Position.Y) - startPointer
+		if not moved and delta.Magnitude < 5 then
+			return
+		end
+		moved = true
+		local newPosition = UDim2.new(
+			startPosition.X.Scale,
+			startPosition.X.Offset + delta.X,
+			startPosition.Y.Scale,
+			startPosition.Y.Offset + delta.Y
+		)
+		if options.Clamp then
+			newPosition = options.Clamp(newPosition)
+		end
+		target.Position = newPosition
+	end))
+
+	table.insert(connections, UserInputService.InputEnded:Connect(function(input)
+		if not dragging or not activeInput then
+			return
+		end
+		local same = input == activeInput
+			or (input.UserInputType == Enum.UserInputType.MouseButton1
+				and activeInput.UserInputType == Enum.UserInputType.MouseButton1)
+		if not same then
+			return
+		end
+		dragging = false
+		activeInput = nil
+		if moved then
+			if options.OnDragEnd then
+				options.OnDragEnd()
+			end
+		elseif options.OnClick then
+			options.OnClick()
+		end
+	end))
+end
+
+----------------------------------------------------------------
+-- Componentes (metodos de Tab)
+----------------------------------------------------------------
+function Tab:_nextOrder()
+	self._order = self._order + 1
+	return self._order
+end
+
+function Tab:AddButton(config)
+	config = config or {}
+	local m = self._metrics
+
+	local button = create("TextButton", {
+		Name = "Button",
+		LayoutOrder = self:_nextOrder(),
+		Size = UDim2.new(1, 0, 0, m.Row),
+		BackgroundColor3 = Theme.Element,
+		AutoButtonColor = false,
+		Text = config.Name or "Button",
+		Font = Theme.Font,
+		TextSize = m.Text,
+		TextColor3 = Theme.Text,
+		Parent = self._page,
+	})
+	addCorner(button, 8)
+	local scale = create("UIScale", { Parent = button })
+
+	local hovering = false
+	button.MouseEnter:Connect(function()
+		hovering = true
+		tween(button, Anim.Fast, { BackgroundColor3 = Theme.ElementHover })
+	end)
+	button.MouseLeave:Connect(function()
+		hovering = false
+		tween(button, Anim.Fast, { BackgroundColor3 = Theme.Element })
+		tween(scale, Anim.Fast, { Scale = 1 })
+	end)
+	button.MouseButton1Down:Connect(function()
+		tween(button, 0.08, { BackgroundColor3 = Theme.Accent })
+		tween(scale, 0.08, { Scale = 0.97 })
+	end)
+	button.MouseButton1Up:Connect(function()
+		tween(button, Anim.Fast, { BackgroundColor3 = hovering and Theme.ElementHover or Theme.Element })
+		tween(scale, Anim.Fast, { Scale = 1 })
+	end)
+	button.Activated:Connect(function()
+		safeCall(config.Callback)
+	end)
+
+	return { Instance = button }
+end
+
+function Tab:AddToggle(config)
+	config = config or {}
+	local m = self._metrics
+	local state = config.Default == true
+
+	local row = create("TextButton", {
+		Name = "Toggle",
+		LayoutOrder = self:_nextOrder(),
+		Size = UDim2.new(1, 0, 0, m.Row),
+		BackgroundColor3 = Theme.Element,
+		AutoButtonColor = false,
+		Text = "",
+		Parent = self._page,
+	})
+	addCorner(row, 8)
+
+	create("TextLabel", {
+		Name = "Label",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(12, 0),
+		Size = UDim2.new(1, -70, 1, 0),
+		Text = config.Name or "Toggle",
+		Font = Theme.Font,
+		TextSize = m.Text,
+		TextColor3 = Theme.Text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Parent = row,
+	})
+
+	local switch = create("Frame", {
+		Name = "Switch",
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -12, 0.5, 0),
+		Size = UDim2.fromOffset(40, 22),
+		BackgroundColor3 = state and Theme.Accent or Theme.Off,
+		Parent = row,
+	})
+	create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = switch })
+
+	local knob = create("Frame", {
+		Name = "Knob",
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = state and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
+		Size = UDim2.fromOffset(16, 16),
+		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		Parent = switch,
+	})
+	create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = knob })
+
+	local object = { Instance = row }
+
+	local function render()
+		tween(switch, Anim.Normal, { BackgroundColor3 = state and Theme.Accent or Theme.Off })
+		tween(knob, Anim.Normal, {
+			Position = state and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
+		}, Enum.EasingStyle.Back)
+	end
+
+	function object:Set(value)
+		value = value == true
+		if value == state then
+			return
+		end
+		state = value
+		render()
+		safeCall(config.Callback, state)
+	end
+
+	function object:Get()
+		return state
+	end
+
+	row.MouseEnter:Connect(function()
+		tween(row, Anim.Fast, { BackgroundColor3 = Theme.ElementHover })
+	end)
+	row.MouseLeave:Connect(function()
+		tween(row, Anim.Fast, { BackgroundColor3 = Theme.Element })
+	end)
+	row.Activated:Connect(function()
+		object:Set(not state)
+	end)
+
+	return object
+end
+
+function Tab:AddSlider(config)
+	config = config or {}
+	local m = self._metrics
+	local min = config.Min or 0
+	local max = config.Max or 100
+	if max < min then
+		min, max = max, min
+	end
+	local step = config.Step or 1
+	local suffix = config.Suffix or ""
+	local holderHeight = m.Row + 16
+
+	local function snap(v)
+		v = math.clamp(v, min, max)
+		if step > 0 then
+			v = min + math.floor((v - min) / step + 0.5) * step
+		end
+		v = math.clamp(v, min, max)
+		return math.floor(v * 10000 + 0.5) / 10000
+	end
+
+	local value = snap(config.Default or min)
+
+	local holder = create("Frame", {
+		Name = "Slider",
+		LayoutOrder = self:_nextOrder(),
+		Size = UDim2.new(1, 0, 0, holderHeight),
+		BackgroundColor3 = Theme.Element,
+		Parent = self._page,
+	})
+	addCorner(holder, 8)
+
+	create("TextLabel", {
+		Name = "Label",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(12, 8),
+		Size = UDim2.new(1, -90, 0, 18),
+		Text = config.Name or "Slider",
+		Font = Theme.Font,
+		TextSize = m.Text,
+		TextColor3 = Theme.Text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Parent = holder,
+	})
+
+	local valueLabel = create("TextLabel", {
+		Name = "Value",
+		AnchorPoint = Vector2.new(1, 0),
+		BackgroundTransparency = 1,
+		Position = UDim2.new(1, -12, 0, 8),
+		Size = UDim2.fromOffset(70, 18),
+		Text = "",
+		Font = Theme.Font,
+		TextSize = m.Text,
+		TextColor3 = Theme.SubText,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		Parent = holder,
+	})
+
+	local track = create("Frame", {
+		Name = "Track",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 1, -18),
+		Size = UDim2.new(1, -24, 0, 6),
+		BackgroundColor3 = Theme.Off,
+		Parent = holder,
+	})
+	create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = track })
+
+	local fill = create("Frame", {
+		Name = "Fill",
+		Size = UDim2.new(0, 0, 1, 0),
+		BackgroundColor3 = Theme.Accent,
+		Parent = track,
+	})
+	create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = fill })
+
+	local knob = create("Frame", {
+		Name = "Knob",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0, 0, 0.5, 0),
+		Size = UDim2.fromOffset(14, 14),
+		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		Parent = track,
+	})
+	create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = knob })
+
+	-- Area de toque ampliada (facilita o uso no celular).
+	local hit = create("TextButton", {
+		Name = "Hit",
+		AnchorPoint = Vector2.new(0, 1),
+		BackgroundTransparency = 1,
+		Position = UDim2.new(0, 0, 1, 0),
+		Size = UDim2.new(1, 0, 0, 34),
+		Text = "",
+		AutoButtonColor = false,
+		Parent = holder,
+	})
+
+	local function render(animate)
+		local alpha = 0
+		if max > min then
+			alpha = (value - min) / (max - min)
+		end
+		valueLabel.Text = tostring(value) .. suffix
+		if animate then
+			tween(fill, 0.06, { Size = UDim2.new(alpha, 0, 1, 0) }, Enum.EasingStyle.Linear)
+			tween(knob, 0.06, { Position = UDim2.new(alpha, 0, 0.5, 0) }, Enum.EasingStyle.Linear)
+		else
+			fill.Size = UDim2.new(alpha, 0, 1, 0)
+			knob.Position = UDim2.new(alpha, 0, 0.5, 0)
+		end
+	end
+	render(false)
+
+	local object = { Instance = holder }
+
+	function object:Set(newValue)
+		newValue = snap(newValue)
+		if newValue == value then
+			return
+		end
+		value = newValue
+		render(true)
+		safeCall(config.Callback, value)
+	end
+
+	function object:Get()
+		return value
+	end
+
+	local dragging = false
+
+	local function updateFromInput(input)
+		local width = track.AbsoluteSize.X
+		if width <= 0 then
+			return
+		end
+		local alpha = math.clamp((input.Position.X - track.AbsolutePosition.X) / width, 0, 1)
+		object:Set(min + (max - min) * alpha)
+	end
+
+	local function stopDragging()
+		if not dragging then
+			return
+		end
+		dragging = false
+		self._page.ScrollingEnabled = true
+		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(14, 14) })
+	end
+
+	hit.InputBegan:Connect(function(input)
+		if dragging or not isPointer(input) then
+			return
+		end
+		dragging = true
+		self._page.ScrollingEnabled = false
+		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(18, 18) })
+		updateFromInput(input)
+	end)
+
+	table.insert(self._connections, UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			updateFromInput(input)
+		end
+	end))
+
+	table.insert(self._connections, UserInputService.InputEnded:Connect(function(input)
+		if dragging and isPointer(input) then
+			stopDragging()
+		end
+	end))
+
+	return object
+end
+
+----------------------------------------------------------------
+-- Janela
+----------------------------------------------------------------
+function Window:_selectTab(tab, animate)
+	if self._selectedTab == tab then
+		return
+	end
+	self._selectedTab = tab
+	for _, other in ipairs(self._tabs) do
+		local active = other == tab
+		other._page.Visible = active
+		tween(other._button, Anim.Fast, {
+			BackgroundColor3 = active and Theme.Accent or Theme.Element,
+			TextColor3 = active and Theme.Text or Theme.SubText,
+		})
+	end
+	if animate then
+		tab._page.Position = UDim2.fromOffset(0, 10)
+		tween(tab._page, Anim.Normal, { Position = UDim2.fromOffset(0, 0) })
+	end
+end
+
+function Window:AddTab(name)
+	local m = self._metrics
+	local index = #self._tabs + 1
+
+	local button = create("TextButton", {
+		Name = "Tab_" .. tostring(name),
+		LayoutOrder = index,
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.new(0, 0, 0, m.TabBar - 10),
+		BackgroundColor3 = Theme.Element,
+		AutoButtonColor = false,
+		Text = tostring(name or "Tab"),
+		Font = Theme.Font,
+		TextSize = m.Text,
+		TextColor3 = Theme.SubText,
+		Parent = self._tabBar,
+	})
+	addCorner(button, 8)
+	addPadding(button, 14, 0, 14, 0)
+
+	local page = create("ScrollingFrame", {
+		Name = "Page_" .. tostring(name),
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 1, 0),
+		CanvasSize = UDim2.new(0, 0, 0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = Theme.Accent,
+		Visible = false,
+		Parent = self._content,
+	})
+	addPadding(page, 10, 10, 10, 10)
+	create("UIListLayout", {
+		Padding = UDim.new(0, 8),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = page,
+	})
+
+	local tab = setmetatable({
+		_window = self,
+		_page = page,
+		_button = button,
+		_metrics = m,
+		_connections = self._connections,
+		_order = 0,
+	}, Tab)
+
+	table.insert(self._tabs, tab)
+
+	button.Activated:Connect(function()
+		self:_selectTab(tab, true)
+	end)
+
+	if index == 1 then
+		self:_selectTab(tab, false)
+	end
+
+	return tab
+end
+
+function Window:_showBall()
+	self._ball.Visible = true
+	self._ballScale.Scale = 0
+	tween(self._ballScale, Anim.Normal + 0.05, { Scale = 1 }, Enum.EasingStyle.Back)
+end
+
+function Window:Minimize()
+	if self._state ~= "Open" then
+		return
+	end
+	self._state = "Minimizing"
+	local root = self._root
+	self._restorePosition = root.Position
+
+	local duration = Anim.Normal + 0.1
+	tween(root, duration, {
+		Position = self._ball.Position,
+		GroupTransparency = 1,
+	}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	local t = tween(self._scale, duration, { Scale = 0.1 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	t.Completed:Connect(function(playbackState)
+		if playbackState ~= Enum.PlaybackState.Completed or self._state ~= "Minimizing" then
+			return
+		end
+		root.Visible = false
+		self._state = "Minimized"
+		self:_showBall()
+	end)
+end
+
+function Window:Restore()
+	if self._state ~= "Minimized" then
+		return
+	end
+	self._state = "Restoring"
+	local root = self._root
+	local ballPosition = self._ball.Position
+
+	local t = tween(self._ballScale, Anim.Fast, { Scale = 0 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	t.Completed:Connect(function(playbackState)
+		if playbackState ~= Enum.PlaybackState.Completed or self._state ~= "Restoring" then
+			return
+		end
+		self._ball.Visible = false
+
+		local size = getWindowSize()
+		root.Size = size
+		root.Position = ballPosition
+		root.GroupTransparency = 1
+		self._scale.Scale = 0.1
+		root.Visible = true
+
+		tween(root, Anim.Slow, {
+			Position = clampWindowPosition(self._restorePosition, size),
+			GroupTransparency = 0,
+		})
+		local t2 = tween(self._scale, Anim.Slow, { Scale = 1 }, Enum.EasingStyle.Back)
+		t2.Completed:Connect(function(state2)
+			if state2 == Enum.PlaybackState.Completed and self._state == "Restoring" then
+				self._state = "Open"
+			end
+		end)
+	end)
+end
+
+function Window:Close()
+	if self._state == "Closing" or self._state == "Destroyed" then
+		return
+	end
+	local wasHidden = not self._root.Visible
+	self._state = "Closing"
+	safeCall(self._onClose)
+
+	if wasHidden then
+		self:Destroy()
+		return
+	end
+
+	tween(self._root, Anim.Normal, { GroupTransparency = 1 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	local t = tween(self._scale, Anim.Normal, { Scale = 0.85 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	t.Completed:Connect(function()
+		self:Destroy()
+	end)
+end
+
+function Window:Destroy()
+	if self._state == "Destroyed" then
+		return
+	end
+	self._state = "Destroyed"
+	for _, connection in ipairs(self._connections) do
+		connection:Disconnect()
+	end
+	table.clear(self._connections)
+	if self._cameraConnection then
+		self._cameraConnection:Disconnect()
+		self._cameraConnection = nil
+	end
+	if self._gui then
+		self._gui:Destroy()
+	end
+end
+
+function Window:_onViewportChanged()
+	if self._state == "Destroyed" then
+		return
+	end
+	if self._state == "Open" then
+		local size = getWindowSize()
+		tween(self._root, Anim.Normal, {
+			Size = size,
+			Position = clampWindowPosition(self._root.Position, size),
+		})
+	end
+	self._ball.Position = clampBallPosition(self._ball.Position, self._metrics.Ball)
+end
+
+function Window:_bindCamera()
+	if self._cameraConnection then
+		self._cameraConnection:Disconnect()
+		self._cameraConnection = nil
+	end
+	local camera = workspace.CurrentCamera
+	if camera then
+		self._cameraConnection = camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+			self:_onViewportChanged()
+		end)
+	end
+end
+
+----------------------------------------------------------------
+-- API publica
+----------------------------------------------------------------
+-- config: Title (string), OnClose (function opcional)
+function AetherUI.CreateWindow(config)
+	config = config or {}
+
+	local player = Players.LocalPlayer
+	assert(player, "[AetherUI] CreateWindow deve ser chamado a partir de um LocalScript.")
+	local playerGui = player:WaitForChild("PlayerGui")
+
+	local self = setmetatable({}, Window)
+	local m = getMetrics()
+	self._metrics = m
+	self._connections = {}
+	self._tabs = {}
+	self._selectedTab = nil
+	self._state = "Opening"
+	self._onClose = config.OnClose
+
+	local gui = create("ScreenGui", {
+		Name = "AetherUI",
+		ResetOnSpawn = false,
+		IgnoreGuiInset = true,
+		DisplayOrder = 1000,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Parent = playerGui,
+	})
+	self._gui = gui
+
+	-- Janela principal (CanvasGroup permite fade de todo o conteudo).
+	local root = create("CanvasGroup", {
+		Name = "Window",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = getWindowSize(),
+		BackgroundColor3 = Theme.Background,
+		GroupTransparency = 1,
+		Parent = gui,
+	})
+	addCorner(root, 12)
+	local rootScale = create("UIScale", { Scale = 0.85, Parent = root })
+	self._root = root
+	self._scale = rootScale
+
+	-- Barra de titulo
+	local titleBar = create("Frame", {
+		Name = "TitleBar",
+		Size = UDim2.new(1, 0, 0, m.Title),
+		BackgroundColor3 = Theme.Surface,
+		Parent = root,
+	})
+
+	local buttonsWidth = m.TitleButton * 2 + 8 + 6 + 8
+	local titleLabel = create("TextLabel", {
+		Name = "Title",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(14, 0),
+		Size = UDim2.new(1, -(buttonsWidth + 14), 1, 0),
+		Text = tostring(config.Title or "AetherUI"),
+		Font = Theme.FontBold,
+		TextSize = m.Text + 2,
+		TextColor3 = Theme.Text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Active = true,
+		Parent = titleBar,
+	})
+
+	create("Frame", {
+		Name = "Divider",
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 0, 1, 0),
+		Size = UDim2.new(1, 0, 0, 1),
+		BackgroundColor3 = Theme.Element,
+		Parent = titleBar,
+	})
+
+	local function makeTitleButton(text, offsetX, hoverColor)
+		local button = create("TextButton", {
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, offsetX, 0.5, 0),
+			Size = UDim2.fromOffset(m.TitleButton, m.TitleButton - 4),
+			BackgroundColor3 = Theme.Element,
+			AutoButtonColor = false,
+			Text = text,
+			Font = Theme.FontBold,
+			TextSize = m.Text + 1,
+			TextColor3 = Theme.Text,
+			Parent = titleBar,
+		})
+		addCorner(button, 6)
+		button.MouseEnter:Connect(function()
+			tween(button, Anim.Fast, { BackgroundColor3 = hoverColor })
+		end)
+		button.MouseLeave:Connect(function()
+			tween(button, Anim.Fast, { BackgroundColor3 = Theme.Element })
+		end)
+		return button
+	end
+
+	local closeButton = makeTitleButton("X", -8, Theme.Danger)
+	local minimizeButton = makeTitleButton("-", -(8 + m.TitleButton + 6), Theme.ElementHover)
+
+	closeButton.Activated:Connect(function()
+		self:Close()
+	end)
+	minimizeButton.Activated:Connect(function()
+		self:Minimize()
+	end)
+
+	-- Barra de abas (rolagem horizontal) e area de conteudo
+	local tabBar = create("ScrollingFrame", {
+		Name = "TabBar",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(0, m.Title),
+		Size = UDim2.new(1, 0, 0, m.TabBar),
+		CanvasSize = UDim2.new(0, 0, 0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.X,
+		ScrollingDirection = Enum.ScrollingDirection.X,
+		ScrollBarThickness = 0,
+		Parent = root,
+	})
+	addPadding(tabBar, 10, 0, 10, 0)
+	create("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		Padding = UDim.new(0, 6),
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Parent = tabBar,
+	})
+	self._tabBar = tabBar
+
+	local content = create("Frame", {
+		Name = "Content",
+		BackgroundTransparency = 1,
+		ClipsDescendants = true,
+		Position = UDim2.fromOffset(0, m.Title + m.TabBar),
+		Size = UDim2.new(1, 0, 1, -(m.Title + m.TabBar)),
+		Parent = root,
+	})
+	self._content = content
+
+	-- Bola flutuante (janela minimizada)
+	local viewport = getViewport()
+	local ball = create("TextButton", {
+		Name = "Ball",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = clampBallPosition(UDim2.fromOffset(44, math.floor(viewport.Y * 0.3)), m.Ball),
+		Size = UDim2.fromOffset(m.Ball, m.Ball),
+		BackgroundColor3 = Theme.Accent,
+		AutoButtonColor = false,
+		Text = "A",
+		Font = Theme.FontBold,
+		TextSize = m.Ball * 0.45,
+		TextColor3 = Theme.Text,
+		Visible = false,
+		Parent = gui,
+	})
+	create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = ball })
+	create("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Color = Color3.fromRGB(255, 255, 255),
+		Transparency = 0.7,
+		Thickness = 2,
+		Parent = ball,
+	})
+	self._ball = ball
+	self._ballScale = create("UIScale", { Scale = 0, Parent = ball })
+
+	-- Arrastar janela pelo titulo e bola pela tela (clique na bola = restaurar)
+	makeDraggable(titleLabel, root, self._connections, {
+		Clamp = function(position)
+			return clampWindowPosition(position, root.Size)
+		end,
+	})
+	makeDraggable(ball, ball, self._connections, {
+		Clamp = function(position)
+			return clampBallPosition(position, m.Ball)
+		end,
+		OnClick = function()
+			self:Restore()
+		end,
+	})
+
+	-- Responsividade
+	self:_bindCamera()
+	table.insert(self._connections, workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+		self:_bindCamera()
+		self:_onViewportChanged()
+	end))
+
+	-- Animacao de abertura
+	tween(root, Anim.Normal + 0.05, { GroupTransparency = 0 })
+	local openTween = tween(rootScale, Anim.Slow, { Scale = 1 }, Enum.EasingStyle.Back)
+	openTween.Completed:Connect(function(playbackState)
+		if playbackState == Enum.PlaybackState.Completed and self._state == "Opening" then
+			self._state = "Open"
+		end
+	end)
+
+	return self
+end
+
+return AetherUI
+
+--[=[
+	EXEMPLO DE USO (LocalScript, ex.: StarterPlayer > StarterPlayerScripts)
+
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local AetherUI = require(ReplicatedStorage:WaitForChild("AetherUI"))
+
+	local window = AetherUI.CreateWindow({
+		Title = "AetherUI Demo",
+		OnClose = function()
+			print("Janela fechada")
+		end,
+	})
+
+	local main = window:AddTab("Principal")
+
+	main:AddButton({
+		Name = "Clique aqui",
+		Callback = function()
+			print("Botao clicado!")
+		end,
+	})
+
+	local toggle = main:AddToggle({
+		Name = "Ativar recurso",
+		Default = false,
+		Callback = function(state)
+			print("Toggle:", state)
+		end,
+	})
+
+	main:AddSlider({
+		Name = "Velocidade",
+		Min = 0,
+		Max = 100,
+		Default = 50,
+		Step = 1,
+		Callback = function(value)
+			print("Slider:", value)
+		end,
+	})
+
+	local settings = window:AddTab("Config")
+	settings:AddSlider({ Name = "Volume", Min = 0, Max = 1, Default = 0.5, Step = 0.1 })
+	settings:AddToggle({ Name = "Notificacoes", Default = true })
+
+	-- Controle manual (opcional):
+	-- window:Minimize()   -- vira bola flutuante
+	-- window:Restore()    -- reabre a janela
+	-- window:Close()      -- fecha e destroi
+	-- toggle:Set(true); print(toggle:Get())
+]=]
