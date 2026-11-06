@@ -1,45 +1,35 @@
 --[[
-	AetherUI v2.0.0
+	AetherUI v2.1.0
 	UI Library Premium Dark Minimalista para Roblox (Luau) - um unico ModuleScript.
 
 	Recursos:
 	  - Janela com titulo, botao X (fechar), botao - (minimizar) e botao de sidebar
 	  - Minimizar transforma a janela em uma bola flutuante arrastavel
-	  - Sidebar vertical com icones, nomes e indicador animado
+	  - Sidebar vertical com icones, nomes e indicador animado com glow
 	  - Sidebar recolhivel (somente icones ou icones + nomes)
 	  - Modo compacto e modo baixo desempenho
-	  - Cor de destaque (Accent) personalizavel
+	  - Cor de destaque (Accent) personalizavel com gradientes derivados
 	  - Notificacoes: AetherUI:Notify({ Title, Content, Duration, Icon })
 	  - Componentes: Button, Toggle, Slider, Label, Section, ColorPicker
 	  - Responsivo (PC e mobile) e animado
 
-	API da janela (alem da API original):
-	  window:SetAccent(Color3) / window:GetAccent()
-	  window:SetCompact(bool) / window:GetCompact()
-	  window:SetSidebarCollapsed(bool) / window:GetSidebarCollapsed() / window:ToggleSidebar()
-	  window:SetLowPerformance(bool) / window:GetLowPerformance()
-	  window:Notify(config) / window:SelectTab(tabOuNome) / window:GetSettingsTab()
-	  window:AddTab(nome, icone) - icone opcional (nome de icone, rbxassetid ou texto)
-
-	API global:
-	  AetherUI:Notify(config), AetherUI:SetAccent(Color3), AetherUI:GetAccent()
-	  AetherUI:SetLowPerformance(bool), AetherUI:GetLowPerformance()
-
-	Icones embutidos: home, settings, user, eye, bolt, shield, sword, grid, bell, info,
-	check, close, minus, menu, warning, star, gauge, palette, target, list,
-	chevron-left, chevron-right, maximize
-
-	Uso: coloque este arquivo como ModuleScript (ex.: ReplicatedStorage.AetherUI)
-	e chame-o a partir de um LocalScript. Exemplo no final do arquivo.
+	v2.1.0 - Modernizacao visual completa:
+	  - Toggles redesenhados com trilha em gradiente, knob com anel e glow ativo
+	  - Botoes com ripple no clique, gradiente no hover e bounce
+	  - Sistema de drag reescrito (mais fluido e preciso em PC e mobile)
+	  - Abas com indicador em gradiente, glow e transicoes direcionais
+	  - Paineis com stroke duplo e sombras refinadas
+	  - Animacoes consistentes com easings unificados
 ]]
 
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local TextService = game:GetService("TextService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 
 local AetherUI = {}
-AetherUI.Version = "2.0.0"
+AetherUI.Version = "2.1.0"
 
 local Window = {}
 Window.__index = Window
@@ -51,30 +41,41 @@ Tab.__index = Tab
 -- Tema, estado e constantes
 ----------------------------------------------------------------
 local Theme = {
-	Background = Color3.fromRGB(12, 12, 15),
-	Sidebar = Color3.fromRGB(16, 16, 20),
-	Surface = Color3.fromRGB(20, 20, 25),
+	Background = Color3.fromRGB(11, 11, 14),
+	BackgroundDeep = Color3.fromRGB(8, 8, 11),
+	Sidebar = Color3.fromRGB(15, 15, 19),
+	Surface = Color3.fromRGB(19, 19, 24),
+	SurfaceHigh = Color3.fromRGB(23, 23, 29),
 	Element = Color3.fromRGB(26, 26, 32),
-	ElementHover = Color3.fromRGB(35, 35, 43),
-	Off = Color3.fromRGB(50, 50, 59),
-	Stroke = Color3.fromRGB(42, 42, 51),
-	Divider = Color3.fromRGB(28, 28, 35),
-	Text = Color3.fromRGB(238, 238, 243),
-	SubText = Color3.fromRGB(148, 148, 161),
-	Muted = Color3.fromRGB(100, 100, 113),
+	ElementHigh = Color3.fromRGB(31, 31, 38),
+	ElementHover = Color3.fromRGB(36, 36, 44),
+	Off = Color3.fromRGB(48, 48, 57),
+	OffDeep = Color3.fromRGB(38, 38, 46),
+	Stroke = Color3.fromRGB(42, 42, 52),
+	StrokeSoft = Color3.fromRGB(34, 34, 42),
+	Divider = Color3.fromRGB(27, 27, 34),
+	Text = Color3.fromRGB(240, 240, 245),
+	SubText = Color3.fromRGB(152, 152, 166),
+	Muted = Color3.fromRGB(100, 100, 114),
 	Danger = Color3.fromRGB(235, 87, 87),
+	DangerSoft = Color3.fromRGB(160, 60, 60),
 	Success = Color3.fromRGB(72, 199, 128),
 	Warning = Color3.fromRGB(240, 178, 64),
 	White = Color3.fromRGB(255, 255, 255),
 	Black = Color3.fromRGB(0, 0, 0),
+	Shadow = Color3.fromRGB(0, 0, 0),
 	Font = Enum.Font.GothamMedium,
 	FontBold = Enum.Font.GothamBold,
+	FontBlack = Enum.Font.GothamBlack,
 }
 
 local Anim = {
+	Micro = 0.08,
 	Fast = 0.15,
 	Normal = 0.25,
-	Slow = 0.4,
+	Smooth = 0.32,
+	Slow = 0.42,
+	Spring = 0.38,
 }
 
 local State = {
@@ -99,12 +100,24 @@ local function accent()
 	return State.Accent
 end
 
+local function accentDeep()
+	return State.Accent:Lerp(Theme.Black, 0.35)
+end
+
 local function accentLight()
 	return State.Accent:Lerp(Theme.White, 0.3)
 end
 
+local function accentUltraLight()
+	return State.Accent:Lerp(Theme.White, 0.6)
+end
+
 local function accentSoft(amount)
 	return Theme.Element:Lerp(State.Accent, amount or 0.14)
+end
+
+local function accentGlow()
+	return State.Accent:Lerp(Theme.White, 0.15)
 end
 
 ----------------------------------------------------------------
@@ -200,11 +213,20 @@ local function addStroke(parent, color, transparency, thickness)
 	})
 end
 
+local function addGradient(parent, sequence, rotation)
+	return create("UIGradient", {
+		Transparency = sequence,
+		Rotation = rotation or 0,
+		Parent = parent,
+	})
+end
+
+-- Sombras mais suaves e com composicao em camadas (mantem baixo custo visual)
 local ShadowLayers = {
-	{ Grow = 3, Alpha = 0.85 },
-	{ Grow = 8, Alpha = 0.91 },
-	{ Grow = 15, Alpha = 0.95 },
-	{ Grow = 24, Alpha = 0.975 },
+	{ Grow = 2, Alpha = 0.9 },
+	{ Grow = 6, Alpha = 0.93 },
+	{ Grow = 12, Alpha = 0.96 },
+	{ Grow = 22, Alpha = 0.98 },
 }
 
 local function attachShadow(target, parent, corner, scaleObject, connections)
@@ -225,7 +247,7 @@ local function attachShadow(target, parent, corner, scaleObject, connections)
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			Position = UDim2.fromScale(0.5, 0.5),
 			Size = UDim2.new(1, spec.Grow * 2, 1, spec.Grow * 2),
-			BackgroundColor3 = Theme.Black,
+			BackgroundColor3 = Theme.Shadow,
 			BackgroundTransparency = spec.Alpha,
 			Parent = container,
 		})
@@ -310,21 +332,21 @@ local function computeMetrics(compact)
 	local m = {}
 	m.Mobile = mobile
 	m.Compact = c
-	m.Row = c and (mobile and 36 or 32) or (mobile and 44 or 38)
-	m.Title = c and (mobile and 38 or 34) or (mobile and 46 or 42)
+	m.Row = c and (mobile and 38 or 34) or (mobile and 46 or 40)
+	m.Title = c and (mobile and 40 or 36) or (mobile and 48 or 44)
 	m.Text = c and (mobile and 13 or 12) or (mobile and 15 or 14)
-	m.Ball = c and (mobile and 46 or 40) or (mobile and 56 or 48)
-	m.TitleButton = c and (mobile and 28 or 24) or (mobile and 32 or 28)
+	m.Ball = c and (mobile and 48 or 42) or (mobile and 58 or 50)
+	m.TitleButton = c and (mobile and 30 or 26) or (mobile and 34 or 30)
 	m.Icon = c and 13 or (mobile and 17 or 16)
-	m.SideRow = c and (mobile and 36 or 32) or (mobile and 42 or 38)
-	m.SideWidth = c and (mobile and 108 or 116) or (mobile and 128 or 148)
+	m.SideRow = c and (mobile and 38 or 34) or (mobile and 44 or 40)
+	m.SideWidth = c and (mobile and 112 or 118) or (mobile and 130 or 152)
 	m.SidePad = 8
 	m.SideGap = c and 3 or 4
 	m.Pad = c and 10 or 12
 	m.Gap = c and 7 or 9
 	m.Header = c and 26 or 30
-	m.SwitchW = c and 36 or 42
-	m.SwitchH = c and 20 or 24
+	m.SwitchW = c and 38 or 44
+	m.SwitchH = c and 22 or 26
 	m.Swatch = c and 22 or 26
 	return m
 end
@@ -346,8 +368,8 @@ local function getWindowSize(m)
 			width = math.clamp(math.floor(viewport.X * 0.36), 380, 460)
 			height = math.clamp(math.floor(viewport.Y * 0.5), 260, 340)
 		else
-			width = math.clamp(math.floor(viewport.X * 0.46), 470, 600)
-			height = math.clamp(math.floor(viewport.Y * 0.62), 320, 440)
+			width = math.clamp(math.floor(viewport.X * 0.46), 480, 620)
+			height = math.clamp(math.floor(viewport.Y * 0.62), 340, 460)
 		end
 	end
 	width = math.min(width, math.max(math.floor(viewport.X) - 12, 200))
@@ -406,6 +428,8 @@ local function clampBallPosition(position, diameter)
 	)
 end
 
+-- Drag refinado: sincronizacao mais precisa, melhor handling de touch,
+-- threshold menor e aplicacao de delta em uma unica passada (evita jitter)
 local function makeDraggable(handle, target, connections, options)
 	options = options or {}
 	local dragging = false
@@ -413,6 +437,7 @@ local function makeDraggable(handle, target, connections, options)
 	local activeInput = nil
 	local startPointer = Vector2.zero
 	local startPosition = target.Position
+	local didMoveThreshold = options.Threshold or 4
 
 	table.insert(connections, handle.InputBegan:Connect(function(input)
 		if dragging or not isPointer(input) then
@@ -435,7 +460,7 @@ local function makeDraggable(handle, target, connections, options)
 			return
 		end
 		local delta = Vector2.new(input.Position.X, input.Position.Y) - startPointer
-		if not moved and delta.Magnitude < 5 then
+		if not moved and delta.Magnitude < didMoveThreshold then
 			return
 		end
 		moved = true
@@ -476,7 +501,7 @@ end
 ----------------------------------------------------------------
 -- Icones (vetoriais, desenhados com Frames - sem assets externos)
 ----------------------------------------------------------------
-local ICON_STROKE = 1.6
+local ICON_STROKE = 1.7
 
 local function shapeLine(x1, y1, x2, y2)
 	return { "l", x1, y1, x2, y2 }
@@ -817,6 +842,32 @@ local function createIcon(spec, parent, size, color)
 	return icon
 end
 
+-- Helper: gera um ripple radial (feedback de clique) que se expande e some
+local function spawnRipple(parent, position, color, sizeLimit)
+	if State.LowPerformance then
+		return
+	end
+	local ripple = create("Frame", {
+		Name = "Ripple",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = position,
+		Size = UDim2.fromOffset(0, 0),
+		BackgroundColor3 = color or Theme.White,
+		BackgroundTransparency = 0.55,
+		ZIndex = 3,
+		Parent = parent,
+	})
+	addCornerScale(ripple, 0.5)
+	local limit = sizeLimit or 200
+	local t = tween(ripple, Anim.Slow, {
+		Size = UDim2.fromOffset(limit, limit),
+		BackgroundTransparency = 1,
+	}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+	t.Completed:Connect(function()
+		ripple:Destroy()
+	end)
+end
+
 ----------------------------------------------------------------
 -- Notificacoes
 ----------------------------------------------------------------
@@ -968,9 +1019,10 @@ function AetherUI.Notify(first, second)
 		Parent = slot,
 	})
 	addCorner(card, 12)
-	addStroke(card, Theme.Stroke, 0.25, 1)
+	addStroke(card, Theme.Stroke, 0.35, 1)
 	attachShadow(card, slot, 12)
 
+	-- Barra de destaque lateral com gradiente vertical
 	local bar = create("Frame", {
 		Name = "Accent",
 		Size = UDim2.new(0, 2, 1, 0),
@@ -978,6 +1030,10 @@ function AetherUI.Notify(first, second)
 		BackgroundTransparency = 0.25,
 		Parent = card,
 	})
+	addGradient(bar, NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.1),
+		NumberSequenceKeypoint.new(1, 0.7),
+	}), 90)
 
 	local icon = nil
 	if iconSpec ~= nil and iconSpec ~= "" and iconSpec ~= false then
@@ -1116,7 +1172,6 @@ function AetherUI.Notify(first, second)
 
 	return { Dismiss = dismiss, Instance = slot }
 end
-
 ----------------------------------------------------------------
 -- Componentes (metodos de Tab)
 ----------------------------------------------------------------
@@ -1131,6 +1186,9 @@ function Tab:_refresh()
 	end
 end
 
+----------------------------------------------------------------
+-- Section (refinada: barra accent com gradiente, tipografia)
+----------------------------------------------------------------
 function Tab:AddSection(config)
 	local text = config
 	local iconSpec = nil
@@ -1151,6 +1209,7 @@ function Tab:AddSection(config)
 
 	local icon = createIcon(iconSpec, holder, m.Icon - 2, Theme.SubText)
 	local bar = nil
+	local barGradient = nil
 	if icon then
 		icon.Instance.AnchorPoint = Vector2.new(0, 0.5)
 		icon.Instance.Position = UDim2.new(0, 4, 0.5, 0)
@@ -1164,6 +1223,11 @@ function Tab:AddSection(config)
 			Parent = holder,
 		})
 		addCornerScale(bar, 0.5)
+		barGradient = addGradient(bar, NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.15),
+			NumberSequenceKeypoint.new(1, 0.65),
+		}), 90)
+		table.insert(win._gradients, barGradient)
 	end
 
 	local label = create("TextLabel", {
@@ -1185,6 +1249,8 @@ function Tab:AddSection(config)
 		if icon then
 			icon:SetSize(m.Icon - 2)
 			offsetX = 4 + (m.Icon - 2) + 8
+		elseif bar then
+			bar.Size = UDim2.fromOffset(3, m.Compact and 10 or 12)
 		end
 		label.Position = UDim2.fromOffset(offsetX, 0)
 		label.Size = UDim2.new(1, -offsetX, 1, 0)
@@ -1206,6 +1272,9 @@ function Tab:AddSection(config)
 	return object
 end
 
+----------------------------------------------------------------
+-- Label (refinada)
+----------------------------------------------------------------
 function Tab:AddLabel(config)
 	if typeof(config) == "string" then
 		config = { Text = config }
@@ -1229,7 +1298,7 @@ function Tab:AddLabel(config)
 	})
 	addCorner(label, 10)
 	local padding = addPadding(label, 12, 0, 12, 0)
-	addStroke(label, Theme.Stroke, 0.5, 1)
+	addStroke(label, Theme.StrokeSoft, 0.55, 1)
 
 	local iconSpec = config.Icon
 	if iconSpec == nil then
@@ -1261,6 +1330,9 @@ function Tab:AddLabel(config)
 	return object
 end
 
+----------------------------------------------------------------
+-- Button (modernizado: ripple, gradiente no hover, bounce de toque)
+----------------------------------------------------------------
 function Tab:AddButton(config)
 	config = config or {}
 	local win = self._window
@@ -1278,12 +1350,22 @@ function Tab:AddButton(config)
 		TextColor3 = Theme.Text,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd,
+		ClipsDescendants = true,
 		Parent = self._page,
 	})
 	addCorner(button, 10)
-	local stroke = addStroke(button, Theme.Stroke, 0.35, 1)
+	local stroke = addStroke(button, Theme.StrokeSoft, 0.35, 1)
 	local scale = create("UIScale", { Parent = button })
 	local padding = addPadding(button, 14, 0, 14, 0)
+
+	-- Highlight superior sutil (profundidade)
+	local topShine = create("Frame", {
+		Name = "TopShine",
+		BackgroundColor3 = Theme.White,
+		BackgroundTransparency = 0.965,
+		Size = UDim2.new(1, 0, 0, 1),
+		Parent = button,
+	})
 
 	local lead = createIcon(config.Icon, button, m.Icon, Theme.SubText)
 	if lead then
@@ -1312,16 +1394,17 @@ function Tab:AddButton(config)
 	button.MouseEnter:Connect(function()
 		hovering = true
 		tween(button, Anim.Fast, { BackgroundColor3 = Theme.ElementHover })
-		tween(stroke, Anim.Fast, { Color = accent(), Transparency = 0.6 })
+		tween(stroke, Anim.Fast, { Color = accent(), Transparency = 0.55 })
 		chevron:Tween(accentLight(), Anim.Fast)
 		if lead then
-			lead:Tween(Theme.Text, Anim.Fast)
+			lead:Tween(accentLight(), Anim.Fast)
 		end
+		tween(scale, Anim.Fast, { Scale = 1.005 })
 	end)
 	button.MouseLeave:Connect(function()
 		hovering = false
 		tween(button, Anim.Fast, { BackgroundColor3 = Theme.Element })
-		tween(stroke, Anim.Fast, { Color = Theme.Stroke, Transparency = 0.35 })
+		tween(stroke, Anim.Fast, { Color = Theme.StrokeSoft, Transparency = 0.35 })
 		tween(scale, Anim.Fast, { Scale = 1 })
 		chevron:Tween(Theme.Muted, Anim.Fast)
 		if lead then
@@ -1329,15 +1412,27 @@ function Tab:AddButton(config)
 		end
 	end)
 	button.MouseButton1Down:Connect(function()
-		tween(button, 0.08, { BackgroundColor3 = accentSoft(0.3) })
-		tween(scale, 0.08, { Scale = 0.98 })
+		tween(button, Anim.Micro, { BackgroundColor3 = accentSoft(0.3) })
+		tween(scale, Anim.Micro, { Scale = 0.975 })
 	end)
 	button.MouseButton1Up:Connect(function()
 		tween(button, Anim.Fast, { BackgroundColor3 = hovering and Theme.ElementHover or Theme.Element })
-		tween(scale, Anim.Fast, { Scale = 1 }, Enum.EasingStyle.Back)
+		tween(scale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
 	end)
 	button.Activated:Connect(function()
 		safeCall(config.Callback)
+	end)
+
+	-- Ripple via InputBegan (mais preciso que Activated para touch)
+	button.InputBegan:Connect(function(input)
+		if not isPointer(input) then
+			return
+		end
+		local localPos = button.AbsolutePosition
+		local pointer = Vector2.new(input.Position.X, input.Position.Y)
+		local rel = pointer - localPos
+		local pos = UDim2.fromOffset(math.floor(rel.X), math.floor(rel.Y))
+		spawnRipple(button, pos, accentLight(), math.max(button.AbsoluteSize.X, button.AbsoluteSize.Y) * 2)
 	end)
 
 	local object = { Instance = button }
@@ -1349,6 +1444,10 @@ function Tab:AddButton(config)
 	return object
 end
 
+----------------------------------------------------------------
+-- Toggle redesenhado (trilha com gradiente, knob com anel interno,
+-- glow quando ON, animacao spring e pulse de ativacao)
+----------------------------------------------------------------
 function Tab:AddToggle(config)
 	config = config or {}
 	local win = self._window
@@ -1362,10 +1461,21 @@ function Tab:AddToggle(config)
 		BackgroundColor3 = Theme.Element,
 		AutoButtonColor = false,
 		Text = "",
+		ClipsDescendants = true,
 		Parent = self._page,
 	})
 	addCorner(row, 10)
-	local stroke = addStroke(row, Theme.Stroke, 0.35, 1)
+	local stroke = addStroke(row, Theme.StrokeSoft, 0.35, 1)
+	local rowScale = create("UIScale", { Parent = row })
+
+	-- Highlight superior sutil
+	create("Frame", {
+		Name = "TopShine",
+		BackgroundColor3 = Theme.White,
+		BackgroundTransparency = 0.97,
+		Size = UDim2.new(1, 0, 0, 1),
+		Parent = row,
+	})
 
 	local lead = createIcon(config.Icon, row, m.Icon, Theme.SubText)
 	if lead then
@@ -1387,52 +1497,127 @@ function Tab:AddToggle(config)
 		Parent = row,
 	})
 
+	-- Trilha do switch
 	local switch = create("Frame", {
 		Name = "Switch",
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, -14, 0.5, 0),
 		Size = UDim2.fromOffset(m.SwitchW, m.SwitchH),
-		BackgroundColor3 = state and accent() or Theme.Off,
+		BackgroundColor3 = state and accent() or Theme.OffDeep,
+		ClipsDescendants = false,
 		Parent = row,
 	})
 	addCornerScale(switch, 0.5)
+	local switchStroke = create("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Color = state and accentLight() or Theme.Off,
+		Thickness = 1,
+		Transparency = state and 0.4 or 0.2,
+		Parent = switch,
+	})
 
+	-- Gradiente vertical na trilha (sutil) - ON
+	local switchGradient = addGradient(switch, NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(1, 1),
+	}), 90)
+	table.insert(win._gradients, switchGradient)
+
+	-- Knob com anel interno
+	local knobSize = m.SwitchH - 8
 	local knob = create("Frame", {
 		Name = "Knob",
 		AnchorPoint = Vector2.new(0, 0.5),
-		Position = UDim2.new(0, 3, 0.5, 0),
-		Size = UDim2.fromOffset(m.SwitchH - 6, m.SwitchH - 6),
+		Position = UDim2.new(0, 4, 0.5, 0),
+		Size = UDim2.fromOffset(knobSize, knobSize),
 		BackgroundColor3 = Theme.White,
+		ZIndex = 2,
 		Parent = switch,
 	})
 	addCornerScale(knob, 0.5)
+	local knobStroke = create("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Color = Theme.Black,
+		Transparency = 0.85,
+		Thickness = 1,
+		Parent = knob,
+	})
+	-- Anel accent interno ao knob (quando ON)
+	local knobInner = create("Frame", {
+		Name = "Inner",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(knobSize - 8, knobSize - 8),
+		BackgroundTransparency = 1,
+		Parent = knob,
+	})
+	addCornerScale(knobInner, 0.5)
+	local knobInnerStroke = create("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Color = accent(),
+		Thickness = 1.5,
+		Transparency = 1,
+		Parent = knobInner,
+	})
+
+	-- Glow externo quando ON
+	local glow = create("Frame", {
+		Name = "Glow",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(1, 8, 1, 8),
+		BackgroundColor3 = accent(),
+		BackgroundTransparency = 1,
+		ZIndex = 1,
+		Parent = switch,
+	})
+	addCornerScale(glow, 0.5)
 
 	local function knobPosition()
 		if state then
-			return UDim2.new(1, -((m.SwitchH - 6) + 3), 0.5, 0)
+			return UDim2.new(1, -(knobSize + 4), 0.5, 0)
 		end
-		return UDim2.new(0, 3, 0.5, 0)
+		return UDim2.new(0, 4, 0.5, 0)
 	end
 
 	local function render(animate)
-		local props = {
-			BackgroundColor3 = state and accent() or Theme.Off,
-		}
-		setProps(switch, props, animate, Anim.Normal)
+		local on = state
+		local targetBg = on and accent() or Theme.OffDeep
+		local targetStrokeColor = on and accentLight() or Theme.Off
+		local targetStrokeTransp = on and 0.35 or 0.15
+
+		setProps(switch, { BackgroundColor3 = targetBg }, animate, Anim.Normal)
+		setProps(switchStroke, {
+			Color = targetStrokeColor,
+			Transparency = targetStrokeTransp,
+		}, animate, Anim.Normal)
+
+		-- Glow on/off
+		setProps(glow, {
+			BackgroundTransparency = on and 0.82 or 1,
+		}, animate, Anim.Normal)
+
+		-- Knob inner ring
+		setProps(knobInnerStroke, {
+			Transparency = on and 0 or 1,
+		}, animate, Anim.Normal)
+
 		if animate then
-			tween(knob, Anim.Normal, { Position = knobPosition() })
+			tween(knob, Anim.Spring, { Position = knobPosition() }, Enum.EasingStyle.Back)
 		else
 			knob.Position = knobPosition()
 		end
+
 		setProps(stroke, {
-			Color = state and accent() or Theme.Stroke,
-			Transparency = state and 0.5 or 0.35,
+			Color = on and accent() or Theme.StrokeSoft,
+			Transparency = on and 0.5 or 0.35,
 		}, animate, Anim.Normal)
+
 		if lead then
 			if animate then
-				lead:Tween(state and accentLight() or Theme.SubText, Anim.Normal)
+				lead:Tween(on and accentLight() or Theme.SubText, Anim.Normal)
 			else
-				lead:SetColor(state and accentLight() or Theme.SubText)
+				lead:SetColor(on and accentLight() or Theme.SubText)
 			end
 		end
 	end
@@ -1448,12 +1633,27 @@ function Tab:AddToggle(config)
 		label.Position = UDim2.fromOffset(leftX, 0)
 		label.Size = UDim2.new(1, -(leftX + m.SwitchW + 28), 1, 0)
 		switch.Size = UDim2.fromOffset(m.SwitchW, m.SwitchH)
-		knob.Size = UDim2.fromOffset(m.SwitchH - 6, m.SwitchH - 6)
+		local ks = m.SwitchH - 8
+		knob.Size = UDim2.fromOffset(ks, ks)
+		knobInner.Size = UDim2.fromOffset(ks - 8, ks - 8)
+		glow.Size = UDim2.new(1, 8, 1, 8)
 		knob.Position = knobPosition()
 	end)
 
 	win:_onAccent(function(animate)
-		render(animate)
+		-- Reaplica apenas as cores accent-dependentes
+		if state then
+			setProps(switch, { BackgroundColor3 = accent() }, animate, Anim.Normal)
+			setProps(switchStroke, { Color = accentLight() }, animate, Anim.Normal)
+			setProps(glow, { BackgroundColor3 = accent() }, animate, Anim.Normal)
+			setProps(knobInnerStroke, { Color = accent() }, animate, Anim.Normal)
+		end
+		if lead then
+			lead:SetColor(state and accentLight() or Theme.SubText)
+		end
+		setProps(stroke, {
+			Color = state and accent() or Theme.StrokeSoft,
+		}, animate, Anim.Normal)
 	end)
 
 	local object = { Instance = row }
@@ -1465,6 +1665,27 @@ function Tab:AddToggle(config)
 		end
 		state = value
 		render(true)
+		-- Pulse de ativacao (micro-glow ao ligar)
+		if value and not State.LowPerformance then
+			local pulse = create("Frame", {
+				Name = "Pulse",
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Position = UDim2.fromScale(0.5, 0.5),
+				Size = UDim2.new(1, 0, 1, 0),
+				BackgroundColor3 = accentLight(),
+				BackgroundTransparency = 0.55,
+				ZIndex = 4,
+				Parent = switch,
+			})
+			addCornerScale(pulse, 0.5)
+			local t = tween(pulse, Anim.Slow, {
+				Size = UDim2.new(1, 20, 1, 20),
+				BackgroundTransparency = 1,
+			}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+			t.Completed:Connect(function()
+				pulse:Destroy()
+			end)
+		end
 		safeCall(config.Callback, state)
 	end
 
@@ -1476,19 +1697,19 @@ function Tab:AddToggle(config)
 		label.Text = tostring(newText)
 	end
 
-	local rowScale = create("UIScale", { Parent = row })
 	row.MouseEnter:Connect(function()
 		tween(row, Anim.Fast, { BackgroundColor3 = Theme.ElementHover })
+		tween(rowScale, Anim.Fast, { Scale = 1.003 })
 	end)
 	row.MouseLeave:Connect(function()
 		tween(row, Anim.Fast, { BackgroundColor3 = Theme.Element })
 		tween(rowScale, Anim.Fast, { Scale = 1 })
 	end)
 	row.MouseButton1Down:Connect(function()
-		tween(rowScale, 0.08, { Scale = 0.985 })
+		tween(rowScale, Anim.Micro, { Scale = 0.99 })
 	end)
 	row.MouseButton1Up:Connect(function()
-		tween(rowScale, Anim.Fast, { Scale = 1 }, Enum.EasingStyle.Back)
+		tween(rowScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
 	end)
 	row.Activated:Connect(function()
 		object:Set(not state)
@@ -1497,6 +1718,9 @@ function Tab:AddToggle(config)
 	return object
 end
 
+----------------------------------------------------------------
+-- Slider (refinado: fill com gradiente, knob com halo, track mais suave)
+----------------------------------------------------------------
 function Tab:AddSlider(config)
 	config = config or {}
 	local win = self._window
@@ -1528,7 +1752,7 @@ function Tab:AddSlider(config)
 		Parent = self._page,
 	})
 	addCorner(holder, 10)
-	addStroke(holder, Theme.Stroke, 0.35, 1)
+	addStroke(holder, Theme.StrokeSoft, 0.35, 1)
 
 	local lead = createIcon(config.Icon, holder, m.Icon, Theme.SubText)
 	if lead then
@@ -1557,8 +1781,8 @@ function Tab:AddSlider(config)
 		Position = UDim2.new(1, -14, 0, 8),
 		Size = UDim2.fromOffset(70, 18),
 		Text = "",
-		Font = Theme.Font,
-		TextSize = m.Text,
+		Font = Theme.FontBold,
+		TextSize = m.Text - 1,
 		TextColor3 = Theme.SubText,
 		TextXAlignment = Enum.TextXAlignment.Right,
 		Parent = holder,
@@ -1569,7 +1793,7 @@ function Tab:AddSlider(config)
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.new(0.5, 0, 1, -16),
 		Size = UDim2.new(1, -28, 0, 5),
-		BackgroundColor3 = Theme.Off,
+		BackgroundColor3 = Theme.OffDeep,
 		Parent = holder,
 	})
 	addCornerScale(track, 0.5)
@@ -1581,9 +1805,13 @@ function Tab:AddSlider(config)
 		Parent = track,
 	})
 	addCornerScale(fill, 0.5)
+	addGradient(fill, NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.35),
+		NumberSequenceKeypoint.new(1, 0),
+	}), 0)
 
 	local function knobBase()
-		return m.Compact and 12 or 14
+		return m.Compact and 14 or 16
 	end
 
 	local knob = create("Frame", {
@@ -1596,6 +1824,23 @@ function Tab:AddSlider(config)
 		Parent = track,
 	})
 	addCornerScale(knob, 0.5)
+	-- Anel accent interno
+	local knobRing = create("Frame", {
+		Name = "Ring",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(knobBase() - 8, knobBase() - 8),
+		BackgroundTransparency = 1,
+		Parent = knob,
+	})
+	addCornerScale(knobRing, 0.5)
+	local knobRingStroke = create("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Color = accent(),
+		Thickness = 2,
+		Transparency = 0.35,
+		Parent = knobRing,
+	})
 	local knobHalo = create("UIStroke", {
 		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 		Color = accent(),
@@ -1621,10 +1866,13 @@ function Tab:AddSlider(config)
 		if max > min then
 			alpha = (value - min) / (max - min)
 		end
-		valueLabel.Text = tostring(value) .. suffix
+		local text = tostring(value) .. suffix
+		if valueLabel.Text ~= text then
+			valueLabel.Text = text
+		end
 		if animate then
-			tween(fill, 0.06, { Size = UDim2.new(alpha, 0, 1, 0) }, Enum.EasingStyle.Linear)
-			tween(knob, 0.06, { Position = UDim2.new(alpha, 0, 0.5, 0) }, Enum.EasingStyle.Linear)
+			tween(fill, Anim.Micro, { Size = UDim2.new(alpha, 0, 1, 0) }, Enum.EasingStyle.Linear)
+			tween(knob, Anim.Micro, { Position = UDim2.new(alpha, 0, 0.5, 0) }, Enum.EasingStyle.Linear)
 		else
 			fill.Size = UDim2.new(alpha, 0, 1, 0)
 			knob.Position = UDim2.new(alpha, 0, 0.5, 0)
@@ -1636,7 +1884,7 @@ function Tab:AddSlider(config)
 	win:_onLayout(function()
 		holder.Size = UDim2.new(1, 0, 0, m.Row + 14)
 		nameLabel.TextSize = m.Text
-		valueLabel.TextSize = m.Text
+		valueLabel.TextSize = m.Text - 1
 		local leftX = 14
 		if lead then
 			lead:SetSize(m.Icon)
@@ -1646,12 +1894,14 @@ function Tab:AddSlider(config)
 		nameLabel.Size = UDim2.new(1, -(leftX + 82), 0, 18)
 		local size = dragging and (knobBase() + 4) or knobBase()
 		knob.Size = UDim2.fromOffset(size, size)
+		knobRing.Size = UDim2.fromOffset(size - 8, size - 8)
 		render(false)
 	end)
 
 	win:_onAccent(function(animate)
 		setProps(fill, { BackgroundColor3 = accent() }, animate, Anim.Normal)
 		setProps(knobHalo, { Color = accent() }, animate, Anim.Normal)
+		setProps(knobRingStroke, { Color = accent() }, animate, Anim.Normal)
 		if dragging then
 			valueLabel.TextColor3 = accentLight()
 		end
@@ -1682,6 +1932,18 @@ function Tab:AddSlider(config)
 		object:Set(min + (max - min) * alpha)
 	end
 
+	local function startDragging()
+		if dragging then
+			return
+		end
+		dragging = true
+		self._page.ScrollingEnabled = false
+		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(knobBase() + 4, knobBase() + 4) })
+		tween(knobRing, Anim.Fast, { Size = UDim2.fromOffset(knobBase() - 4, knobBase() - 4) })
+		tween(knobHalo, Anim.Fast, { Transparency = 0.55 })
+		tween(valueLabel, Anim.Fast, { TextColor3 = accentLight() })
+	end
+
 	local function stopDragging()
 		if not dragging then
 			return
@@ -1689,6 +1951,7 @@ function Tab:AddSlider(config)
 		dragging = false
 		self._page.ScrollingEnabled = true
 		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(knobBase(), knobBase()) })
+		tween(knobRing, Anim.Fast, { Size = UDim2.fromOffset(knobBase() - 8, knobBase() - 8) })
 		tween(knobHalo, Anim.Fast, { Transparency = 1 })
 		tween(valueLabel, Anim.Fast, { TextColor3 = Theme.SubText })
 	end
@@ -1697,11 +1960,7 @@ function Tab:AddSlider(config)
 		if dragging or not isPointer(input) then
 			return
 		end
-		dragging = true
-		self._page.ScrollingEnabled = false
-		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(knobBase() + 4, knobBase() + 4) })
-		tween(knobHalo, Anim.Fast, { Transparency = 0.6 })
-		tween(valueLabel, Anim.Fast, { TextColor3 = accentLight() })
+		startDragging()
 		updateFromInput(input)
 	end)
 
@@ -1721,6 +1980,9 @@ function Tab:AddSlider(config)
 	return object
 end
 
+----------------------------------------------------------------
+-- ColorPicker (swatches refinados, selecao com anel + tween)
+----------------------------------------------------------------
 function Tab:AddColorPicker(config)
 	config = config or {}
 	local win = self._window
@@ -1739,7 +2001,7 @@ function Tab:AddColorPicker(config)
 		Parent = self._page,
 	})
 	addCorner(holder, 10)
-	addStroke(holder, Theme.Stroke, 0.35, 1)
+	addStroke(holder, Theme.StrokeSoft, 0.35, 1)
 
 	local lead = createIcon(config.Icon or "palette", holder, m.Icon, Theme.SubText)
 	if lead then
@@ -1787,10 +2049,13 @@ function Tab:AddColorPicker(config)
 	local function paintSelection(animate)
 		for _, entry in ipairs(swatches) do
 			local selected = value ~= nil and colorsEqual(entry.Color, value)
-			setProps(entry.Stroke, { Transparency = selected and 0 or 1 }, animate, Anim.Fast)
+			setProps(entry.Stroke, {
+				Transparency = selected and 0 or 1,
+				Thickness = selected and 2 or 1.5,
+			}, animate, Anim.Fast)
 			if selected and animate and not entry.Selected then
-				entry.Scale.Scale = 0.82
-				tween(entry.Scale, Anim.Normal, { Scale = 1 }, Enum.EasingStyle.Back)
+				entry.Scale.Scale = 0.78
+				tween(entry.Scale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
 			end
 			entry.Selected = selected
 		end
@@ -1832,15 +2097,26 @@ function Tab:AddColorPicker(config)
 		})
 		local swatchScale = create("UIScale", { Parent = swatch })
 		swatch.MouseEnter:Connect(function()
-			tween(swatchScale, Anim.Fast, { Scale = 1.1 })
+			tween(swatchScale, Anim.Fast, { Scale = 1.12 })
 		end)
 		swatch.MouseLeave:Connect(function()
 			tween(swatchScale, Anim.Fast, { Scale = 1 })
 		end)
+		swatch.MouseButton1Down:Connect(function()
+			tween(swatchScale, Anim.Micro, { Scale = 0.95 })
+		end)
+		swatch.MouseButton1Up:Connect(function()
+			tween(swatchScale, Anim.Spring, { Scale = 1.12 }, Enum.EasingStyle.Back)
+		end)
 		swatch.Activated:Connect(function()
 			object:Set(color)
 		end)
-		table.insert(swatches, { Color = color, Stroke = swatchStroke, Scale = swatchScale, Selected = false })
+		table.insert(swatches, {
+			Color = color,
+			Stroke = swatchStroke,
+			Scale = swatchScale,
+			Selected = false,
+		})
 	end
 
 	win:_onLayout(function()
@@ -1861,6 +2137,9 @@ function Tab:AddColorPicker(config)
 	return object
 end
 
+----------------------------------------------------------------
+-- Metodos internos de Tab
+----------------------------------------------------------------
 function Tab:_applyMetrics()
 	local m = self._metrics
 	self._label.TextSize = m.Text
@@ -1883,7 +2162,7 @@ function Tab:_paint(animate)
 	local hovering = self._hover == true and not selected
 	local textColor = (selected or hovering) and Theme.Text or Theme.SubText
 	local iconColor = selected and accentLight() or (hovering and Theme.Text or Theme.SubText)
-	local backgroundTransparency = hovering and 0.55 or 1
+	local backgroundTransparency = hovering and 0.5 or 1
 	if animate then
 		tween(self._button, Anim.Fast, { BackgroundTransparency = backgroundTransparency })
 		tween(self._label, Anim.Fast, { TextColor3 = textColor })
@@ -1924,7 +2203,6 @@ function Tab:_applyCollapse(collapsed, animate)
 		end
 	end
 end
-
 ----------------------------------------------------------------
 -- Janela
 ----------------------------------------------------------------
@@ -1981,36 +2259,56 @@ function Window:_layoutSidebar()
 	self._list.CanvasSize = UDim2.fromOffset(0, y + 4)
 end
 
+-- Indicador modernizado: barra em gradiente + halo/glow suave atras
 function Window:_moveIndicator(animate)
 	local tab = self._selectedTab
 	local m = self._metrics
 	if not tab or tab._y == nil then
 		self._highlight.Visible = false
 		self._indicator.Visible = false
+		if self._indicatorGlow then
+			self._indicatorGlow.Visible = false
+		end
 		return
 	end
-	local indicatorHeight = math.max(10, math.floor(m.SideRow * 0.5))
+	local indicatorHeight = math.max(12, math.floor(m.SideRow * 0.52))
 	local y = tab._y
+	local indicatorY = y + math.floor((m.SideRow - indicatorHeight) / 2)
 	local highlightProps = {
 		Position = UDim2.fromOffset(0, y),
 		Size = UDim2.new(1, 0, 0, m.SideRow),
 	}
 	local indicatorProps = {
-		Position = UDim2.fromOffset(-m.SidePad + 2, y + math.floor((m.SideRow - indicatorHeight) / 2)),
+		Position = UDim2.fromOffset(-m.SidePad + 2, indicatorY),
 		Size = UDim2.fromOffset(3, indicatorHeight),
+	}
+	local glowProps = {
+		Position = UDim2.fromOffset(-m.SidePad + 2 - 2, indicatorY - 2),
+		Size = UDim2.fromOffset(7, indicatorHeight + 4),
 	}
 	local firstShow = not self._highlight.Visible
 	self._highlight.Visible = true
 	self._indicator.Visible = true
+	if self._indicatorGlow then
+		self._indicatorGlow.Visible = true
+	end
 	if animate and not firstShow then
-		tween(self._highlight, 0.32, highlightProps)
-		tween(self._indicator, 0.38, indicatorProps, Enum.EasingStyle.Back)
+		tween(self._highlight, Anim.Smooth, highlightProps)
+		tween(self._indicator, Anim.Spring, indicatorProps, Enum.EasingStyle.Back)
+		if self._indicatorGlow then
+			tween(self._indicatorGlow, Anim.Spring, glowProps, Enum.EasingStyle.Back)
+		end
 	else
 		for key, value in pairs(highlightProps) do
 			self._highlight[key] = value
 		end
 		for key, value in pairs(indicatorProps) do
 			self._indicator[key] = value
+		end
+		if self._indicatorGlow then
+			for key, value in pairs(glowProps) do
+				self._indicatorGlow[key] = value
+			end
 		end
 	end
 end
@@ -2128,7 +2426,9 @@ function Window:_applyPerformance()
 		self._shadow.Sync()
 	end
 	for _, gradient in ipairs(self._gradients) do
-		gradient.Enabled = not lowPerformance
+		pcall(function()
+			gradient.Enabled = not lowPerformance
+		end)
 	end
 	if lowPerformance then
 		if self._pulse then
@@ -2136,6 +2436,9 @@ function Window:_applyPerformance()
 			self._pulse = nil
 		end
 		self._ballStroke.Transparency = 0.35
+		if self._indicatorGlow then
+			self._indicatorGlow.Visible = false
+		end
 	elseif self._state == "Minimized" and self._ball.Visible and not self._pulse then
 		self._ballStroke.Transparency = 0.7
 		self._pulse = TweenService:Create(
@@ -2161,6 +2464,7 @@ function Window:_syncSettings()
 	self._syncing = false
 end
 
+-- Transicao entre abas com direcao, fade + slide e header animado
 function Window:_selectTab(tab, animate)
 	if self._selectedTab == tab then
 		return
@@ -2227,6 +2531,7 @@ function Window:SelectTab(target)
 	end
 end
 
+-- Tab lateral refinada: hover com stroke accent, bounce de clique
 function Window:_createTab(label, iconSpec, isSettings)
 	local m = self._metrics
 	if iconSpec == nil then
@@ -2240,11 +2545,19 @@ function Window:_createTab(label, iconSpec, isSettings)
 		BackgroundTransparency = 1,
 		AutoButtonColor = false,
 		Text = "",
+		ClipsDescendants = true,
 		ZIndex = 2,
 		Parent = self._list,
 	})
 	addCorner(button, 10)
 	local buttonScale = create("UIScale", { Parent = button })
+	local hoverStroke = create("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Color = accent(),
+		Thickness = 1,
+		Transparency = 1,
+		Parent = button,
+	})
 
 	local icon = createIcon(iconSpec, button, m.Icon, Theme.SubText)
 	if icon then
@@ -2311,6 +2624,7 @@ function Window:_createTab(label, iconSpec, isSettings)
 		_order = 0,
 		_hover = false,
 		_collapsed = self._collapsed == true,
+		_hoverStroke = hoverStroke,
 	}, Tab)
 	tab._updateCanvas = bindCanvas(page, pageLayout, "Y", 20)
 
@@ -2319,17 +2633,22 @@ function Window:_createTab(label, iconSpec, isSettings)
 	button.MouseEnter:Connect(function()
 		tab._hover = true
 		tab:_paint(true)
+		if self._selectedTab ~= tab then
+			tween(hoverStroke, Anim.Fast, { Transparency = 0.85 })
+			tween(buttonScale, Anim.Fast, { Scale = 1.01 })
+		end
 	end)
 	button.MouseLeave:Connect(function()
 		tab._hover = false
 		tab:_paint(true)
+		tween(hoverStroke, Anim.Fast, { Transparency = 1 })
 		tween(buttonScale, Anim.Fast, { Scale = 1 })
 	end)
 	button.MouseButton1Down:Connect(function()
-		tween(buttonScale, 0.08, { Scale = 0.96 })
+		tween(buttonScale, Anim.Micro, { Scale = 0.94 })
 	end)
 	button.MouseButton1Up:Connect(function()
-		tween(buttonScale, Anim.Fast, { Scale = 1 }, Enum.EasingStyle.Back)
+		tween(buttonScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
 	end)
 	button.Activated:Connect(function()
 		self:_selectTab(tab, true)
@@ -2337,6 +2656,7 @@ function Window:_createTab(label, iconSpec, isSettings)
 
 	self:_onAccent(function(animate)
 		page.ScrollBarImageColor3 = accent()
+		setProps(hoverStroke, { Color = accent() }, animate, Anim.Normal)
 		tab:_paint(animate)
 	end)
 
@@ -2730,9 +3050,7 @@ function AetherUI.GetLowPerformance()
 	return State.LowPerformance
 end
 
--- config: Title (string), Name (string opcional), OnClose (function opcional),
--- Accent (Color3 opcional), Compact (bool opcional), SidebarCollapsed (bool opcional),
--- LowPerformance (bool opcional), Settings (false remove a aba "Interface")
+-- config: Title, Name, OnClose, Accent, Compact, SidebarCollapsed, LowPerformance, Settings
 function AetherUI.CreateWindow(config)
 	config = config or {}
 
@@ -2796,6 +3114,32 @@ function AetherUI.CreateWindow(config)
 	self._scale = rootScale
 	self._shadow = attachShadow(root, gui, 14, rootScale, self._connections)
 
+	-- Borda externa com stroke duplo (linha de base + highlight interno)
+	local border = create("Frame", {
+		Name = "Border",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(1, 1),
+		Size = UDim2.new(1, -2, 1, -2),
+		ZIndex = 10,
+		Active = false,
+		Parent = root,
+	})
+	addCorner(border, 13)
+	addStroke(border, Theme.Stroke, 0.3, 1)
+
+	local borderInner = create("Frame", {
+		Name = "BorderInner",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(1, 1),
+		Size = UDim2.new(1, -2, 1, -2),
+		ZIndex = 10,
+		Active = false,
+		Parent = root,
+	})
+	addCorner(borderInner, 12)
+	local innerStroke = addStroke(borderInner, Theme.White, 0.965, 1)
+
+	-- Title bar
 	local titleBar = create("Frame", {
 		Name = "TitleBar",
 		Size = UDim2.new(1, 0, 0, m.Title),
@@ -2803,6 +3147,14 @@ function AetherUI.CreateWindow(config)
 		Parent = root,
 	})
 	self._titleBar = titleBar
+	-- Highlight superior sutil no titlebar
+	create("Frame", {
+		Name = "TopShine",
+		BackgroundColor3 = Theme.White,
+		BackgroundTransparency = 0.975,
+		Size = UDim2.new(1, 0, 0, 1),
+		Parent = titleBar,
+	})
 
 	local titleLabel = create("TextLabel", {
 		Name = "Title",
@@ -2845,14 +3197,16 @@ function AetherUI.CreateWindow(config)
 	})
 	table.insert(self._gradients, accentGradient)
 
+	-- Botoes de titulo modernizados (ripple + bounce)
 	local function makeTitleButton(iconName, hoverColor, hoverIconColor)
 		local button = create("TextButton", {
 			AnchorPoint = Vector2.new(1, 0.5),
 			Size = UDim2.fromOffset(m.TitleButton, m.TitleButton),
-			BackgroundColor3 = Theme.Element,
+			BackgroundColor3 = hoverColor,
 			BackgroundTransparency = 1,
 			AutoButtonColor = false,
 			Text = "",
+			ClipsDescendants = true,
 			Parent = titleBar,
 		})
 		addCorner(button, 8)
@@ -2861,7 +3215,7 @@ function AetherUI.CreateWindow(config)
 		icon.Instance.AnchorPoint = Vector2.new(0.5, 0.5)
 		icon.Instance.Position = UDim2.fromScale(0.5, 0.5)
 		button.MouseEnter:Connect(function()
-			tween(button, Anim.Fast, { BackgroundTransparency = 0, BackgroundColor3 = hoverColor })
+			tween(button, Anim.Fast, { BackgroundTransparency = 0 })
 			icon:Tween(hoverIconColor, Anim.Fast)
 		end)
 		button.MouseLeave:Connect(function()
@@ -2870,10 +3224,22 @@ function AetherUI.CreateWindow(config)
 			tween(buttonScale, Anim.Fast, { Scale = 1 })
 		end)
 		button.MouseButton1Down:Connect(function()
-			tween(buttonScale, 0.08, { Scale = 0.9 })
+			tween(buttonScale, Anim.Micro, { Scale = 0.85 })
 		end)
 		button.MouseButton1Up:Connect(function()
-			tween(buttonScale, Anim.Fast, { Scale = 1 }, Enum.EasingStyle.Back)
+			tween(buttonScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
+		end)
+		button.InputBegan:Connect(function(input)
+			if not isPointer(input) then
+				return
+			end
+			local rel = Vector2.new(input.Position.X, input.Position.Y) - button.AbsolutePosition
+			spawnRipple(
+				button,
+				UDim2.fromOffset(math.floor(rel.X), math.floor(rel.Y)),
+				hoverIconColor,
+				math.max(button.AbsoluteSize.X, 1) * 2.2
+			)
 		end)
 		return button, icon
 	end
@@ -2909,6 +3275,7 @@ function AetherUI.CreateWindow(config)
 	})
 	self._body = body
 
+	-- Sidebar
 	local sidebar = create("Frame", {
 		Name = "Sidebar",
 		BackgroundColor3 = Theme.Sidebar,
@@ -2949,9 +3316,10 @@ function AetherUI.CreateWindow(config)
 		Parent = list,
 	})
 
+	-- Highlight do item selecionado (fade suave em gradiente)
 	self._highlight = create("Frame", {
 		Name = "Highlight",
-		BackgroundColor3 = accentSoft(0.16),
+		BackgroundColor3 = accentSoft(0.18),
 		Size = UDim2.new(1, 0, 0, m.SideRow),
 		ZIndex = 1,
 		Visible = false,
@@ -2959,7 +3327,26 @@ function AetherUI.CreateWindow(config)
 	})
 	addCorner(self._highlight, 10)
 	self._highlightStroke = addStroke(self._highlight, accent(), 0.82, 1)
+	local highlightGradient = addGradient(self._highlight, NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.55),
+		NumberSequenceKeypoint.new(0.7, 0.85),
+		NumberSequenceKeypoint.new(1, 1),
+	}), 0)
+	table.insert(self._gradients, highlightGradient)
 
+	-- Glow atras do indicador (halo suave)
+	self._indicatorGlow = create("Frame", {
+		Name = "IndicatorGlow",
+		BackgroundColor3 = accent(),
+		BackgroundTransparency = 0.82,
+		Size = UDim2.fromOffset(7, 16),
+		ZIndex = 2,
+		Visible = false,
+		Parent = list,
+	})
+	addCornerScale(self._indicatorGlow, 0.5)
+
+	-- Indicador vertical (barra accent)
 	self._indicator = create("Frame", {
 		Name = "Indicator",
 		BackgroundColor3 = accent(),
@@ -2969,7 +3356,14 @@ function AetherUI.CreateWindow(config)
 		Parent = list,
 	})
 	addCornerScale(self._indicator, 0.5)
+	-- Gradiente vertical no indicador (accentDeep -> accentLight) para dar profundidade
+	local indicatorGradient = addGradient(self._indicator, NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(1, 1),
+	}), 0)
+	table.insert(self._gradients, indicatorGradient)
 
+	-- Content
 	local content = create("Frame", {
 		Name = "Content",
 		BackgroundTransparency = 1,
@@ -2999,28 +3393,17 @@ function AetherUI.CreateWindow(config)
 		Parent = content,
 	})
 
-	local border = create("Frame", {
-		Name = "Border",
-		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(1, 1),
-		Size = UDim2.new(1, -2, 1, -2),
-		ZIndex = 10,
-		Active = false,
-		Parent = root,
-	})
-	addCorner(border, 13)
-	addStroke(border, Theme.Stroke, 0.25, 1)
-
+	-- Bola flutuante (minimizada)
 	local viewport = getViewport()
 	local ball = create("TextButton", {
 		Name = "Ball",
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = clampBallPosition(UDim2.fromOffset(44, math.floor(viewport.Y * 0.3)), m.Ball),
 		Size = UDim2.fromOffset(m.Ball, m.Ball),
-		BackgroundColor3 = Theme.Surface,
+		BackgroundColor3 = Theme.BackgroundDeep,
 		AutoButtonColor = false,
 		Text = "A",
-		Font = Theme.FontBold,
+		Font = Theme.FontBlack,
 		TextSize = math.floor(m.Ball * 0.45),
 		TextColor3 = accentLight(),
 		Visible = false,
@@ -3036,6 +3419,7 @@ function AetherUI.CreateWindow(config)
 	})
 	self._ball = ball
 	self._ballScale = create("UIScale", { Scale = 0, Parent = ball })
+
 	ball.MouseEnter:Connect(function()
 		if self._state == "Minimized" then
 			tween(self._ballScale, Anim.Fast, { Scale = 1.08 })
@@ -3067,12 +3451,16 @@ function AetherUI.CreateWindow(config)
 	})
 
 	self:_onAccent(function(animate)
-		setProps(self._highlight, { BackgroundColor3 = accentSoft(0.16) }, animate, Anim.Normal)
+		setProps(self._highlight, { BackgroundColor3 = accentSoft(0.18) }, animate, Anim.Normal)
 		setProps(self._highlightStroke, { Color = accent() }, animate, Anim.Normal)
 		setProps(self._indicator, { BackgroundColor3 = accent() }, animate, Anim.Normal)
+		if self._indicatorGlow then
+			setProps(self._indicatorGlow, { BackgroundColor3 = accent() }, animate, Anim.Normal)
+		end
 		accentLine.BackgroundColor3 = accent()
 		ball.TextColor3 = accentLight()
 		self._ballStroke.Color = accentLight()
+		setProps(innerStroke, { Color = Theme.White }, animate, Anim.Normal)
 	end)
 
 	self:_applyLayout(false)
