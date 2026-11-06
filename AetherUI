@@ -1986,6 +1986,48 @@ end
 function Tab:AddColorPicker(config)
 	config = config or {}
 	local win = self._window
+function Tab:AddSearch(config)
+	config = config or {}
+	local win = self._window
+	local m = self._metrics
+
+	local holder = create("Frame", {
+		Name = "Search",
+		LayoutOrder = self:_nextOrder(),
+		Size = UDim2.new(1, 0, 0, m.Row),
+		BackgroundColor3 = Theme.Element,
+		Parent = self._page,
+	})
+	addCorner(holder, 10)
+	addStroke(holder, Theme.StrokeSoft, 0.35, 1)
+
+	local icon = createIcon("grid", holder, m.Icon, Theme.SubText)
+	icon.Instance.Position = UDim2.new(0, 14, 0.5, 0)
+	icon.Instance.AnchorPoint = Vector2.new(0, 0.5)
+
+	local input = create("TextBox", {
+		Name = "Input",
+		BackgroundTransparency = 1,
+		Position = UDim2.new(0, 14 + m.Icon + 8, 0, 0),
+		Size = UDim2.new(1, -(22 + m.Icon), 1, 0),
+		Text = "",
+		PlaceholderText = config.Placeholder or "Pesquisar...",
+		PlaceholderColor3 = Theme.Muted,
+		Font = Theme.Font,
+		TextSize = m.Text,
+		TextColor3 = Theme.Text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = holder,
+	})
+
+	input:GetPropertyChangedSignal("Text"):Connect(function()
+		safeCall(config.Callback, input.Text)
+	end)
+
+	local object = { Instance = holder }
+	return object
+end
+
 	local m = self._metrics
 	local colors = config.Colors or DefaultSwatches
 	local value = nil
@@ -3245,6 +3287,41 @@ function AetherUI.CreateWindow(config)
 	end
 
 	local closeButton, closeIcon = makeTitleButton("close", Theme.Danger, Theme.White)
+	local function showConfirmClose()
+		local overlay = create("Frame", {
+			Name = "ConfirmOverlay",
+			Size = UDim2.fromScale(1, 1),
+			BackgroundColor3 = Theme.Black,
+			BackgroundTransparency = 1,
+			ZIndex = 20,
+			Parent = root
+		})
+		local blur = create("BlurEffect", { Size = 0, Parent = game:GetService("Lighting") })
+		local modal = create("Frame", {
+			Name = "Modal",
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromOffset(240, 120),
+			BackgroundColor3 = Theme.Surface,
+			GroupTransparency = 1,
+			Parent = overlay
+		})
+		addCorner(modal, 12)
+		addStroke(modal, Theme.Stroke, 0.5, 1)
+		create("TextLabel", { Text = "Fechar interface?", Size = UDim2.new(1, 0, 0.4, 0), BackgroundTransparency = 1, Font = Theme.FontBold, TextSize = 14, TextColor3 = Theme.Text, Parent = modal })
+		local btnHolder = create("Frame", { Size = UDim2.new(1, 0, 0.6, 0), Position = UDim2.fromOffset(0, 48), BackgroundTransparency = 1, Parent = modal })
+		local function makeBtn(txt, color, cb)
+			local b = create("TextButton", { Text = txt, Size = UDim2.fromOffset(100, 32), BackgroundColor3 = color, TextColor3 = Theme.White, Font = Theme.Font, TextSize = 12, Parent = btnHolder })
+			addCorner(b, 8)
+		b.Activated:Connect(cb)
+			return b
+		end
+		makeBtn("Sim", Theme.Danger, function() self:Destroy(); blur:Destroy() end)
+		makeBtn("Não", Theme.Off, function() tween(overlay, Anim.Fast, {BackgroundTransparency = 1}); tween(modal, Anim.Fast, {GroupTransparency = 1}); tween(blur, Anim.Fast, {Size = 0}); task.wait(0.2); overlay:Destroy(); blur:Destroy() end)
+		tween(overlay, Anim.Fast, {BackgroundTransparency = 0.5})
+		tween(modal, Anim.Fast, {GroupTransparency = 0})
+		tween(blur, Anim.Fast, {Size = 15})
+	end
 	local minimizeButton, minimizeIcon = makeTitleButton("minus", Theme.ElementHover, Theme.Text)
 	local menuButton, menuIcon = makeTitleButton("menu", Theme.ElementHover, Theme.Text)
 	menuButton.AnchorPoint = Vector2.new(0, 0.5)
@@ -3255,9 +3332,9 @@ function AetherUI.CreateWindow(config)
 	self._menuButton = menuButton
 	self._menuIcon = menuIcon
 
-	closeButton.Activated:Connect(function()
-		self:Close()
-	end)
+		closeButton.Activated:Connect(function()
+			showConfirmClose()
+		end)
 	minimizeButton.Activated:Connect(function()
 		self:Minimize()
 	end)
