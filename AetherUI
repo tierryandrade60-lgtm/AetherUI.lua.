@@ -2943,82 +2943,23 @@ function Window:Restore()
 	end)
 end
 
-function Window:_prompt(message, callback)
-	if self._prompting then return end
-	self._prompting = true
-	local overlay = create("Frame", {
-		Name = "PromptOverlay",
-		Size = UDim2.fromScale(1, 1),
-		BackgroundColor3 = Theme.Black,
-		BackgroundTransparency = 1,
-		ZIndex = 200,
-		Parent = self._root,
-	})
-	addCorner(overlay, 14)
-	local box = create("CanvasGroup", {
-		Name = "PromptBox",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.55),
-		Size = UDim2.fromOffset(240, 120),
-		BackgroundColor3 = Theme.SurfaceHigh,
-		GroupTransparency = 1,
-		Parent = overlay,
-	})
-	addCorner(box, 12)
-	addStroke(box, Theme.Stroke, 0.4, 1)
-	create("TextLabel", {
-		Size = UDim2.new(1, 0, 0, 60),
-		BackgroundTransparency = 1,
-		Text = message,
-		Font = Theme.Font,
-		TextSize = self._metrics.Text,
-		TextColor3 = Theme.Text,
-		Parent = box,
-	})
-	local function btn(txt, x, color, cb)
-		local b = create("TextButton", {
-			Size = UDim2.new(0.4, 0, 0, 34),
-			Position = UDim2.fromScale(x, 0.62),
-			BackgroundColor3 = color,
-			Text = txt,
-			Font = Theme.FontBold,
-			TextSize = self._metrics.Text - 1,
-			TextColor3 = Theme.White,
-			Parent = box,
-		})
-		addCorner(b, 8)
-		b.Activated:Connect(cb)
-	end
-	local function finish(res)
-		self._prompting = false
-		tween(overlay, Anim.Fast, { BackgroundTransparency = 1 })
-		local t = tween(box, Anim.Fast, { GroupTransparency = 1, Position = UDim2.fromScale(0.5, 0.58) })
-		t.Completed:Connect(function() overlay:Destroy() end)
-		callback(res)
-	end
-	btn("Sim", 0.07, accent(), function() finish(true) end)
-	btn("Não", 0.53, Theme.Element, function() finish(false) end)
-	tween(overlay, Anim.Normal, { BackgroundTransparency = 0.35 })
-	tween(box, Anim.Normal, { GroupTransparency = 0, Position = UDim2.fromScale(0.5, 0.5) })
-end
-
-
 function Window:Close()
 	if self._state == "Closing" or self._state == "Destroyed" then
 		return
 	end
-	self:_prompt("Deseja fechar a janela?", function(confirmed)
-		if not confirmed then return end
-		local wasHidden = not self._root.Visible
-		self._state = "Closing"
-		safeCall(self._onClose)
-		if wasHidden then
-			self:Destroy()
-			return
-		end
-		tween(self._root, Anim.Normal, { GroupTransparency = 1 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-		local t = tween(self._scale, Anim.Normal, { Scale = 0.94 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-		t.Completed:Connect(function() self:Destroy() end)
+	local wasHidden = not self._root.Visible
+	self._state = "Closing"
+	safeCall(self._onClose)
+
+	if wasHidden then
+		self:Destroy()
+		return
+	end
+
+	tween(self._root, Anim.Normal, { GroupTransparency = 1 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	local t = tween(self._scale, Anim.Normal, { Scale = 0.94 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	t.Completed:Connect(function()
+		self:Destroy()
 	end)
 end
 
@@ -3285,7 +3226,7 @@ function AetherUI.CreateWindow(config)
 		button.MouseButton1Down:Connect(function()
 			tween(buttonScale, Anim.Micro, { Scale = 0.85 })
 		end)
-		button.MouseButton1Up:aConnect(function()
+		button.MouseButton1Up:Connect(function()
 			tween(buttonScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
 		end)
 		button.InputBegan:Connect(function(input)
