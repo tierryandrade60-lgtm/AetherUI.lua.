@@ -1,5 +1,5 @@
 --[[
-	AetherUI v1.0.0
+	AetherUI v1.1.0
 	UI Library minimalista para Roblox (Luau) - um unico ModuleScript.
 
 	Recursos:
@@ -7,7 +7,7 @@
 	  - Minimizar transforma a janela em uma bola flutuante arrastavel
 	  - Clicar na bola reabre a janela com animacao
 	  - Sistema de abas
-	  - Componentes: Button, Toggle, Slider
+	  - Componentes: Button, Toggle, Slider, Label, Section
 	  - Responsivo (PC e mobile) e animado
 
 	Uso: coloque este arquivo como ModuleScript (ex.: ReplicatedStorage.AetherUI)
@@ -16,10 +16,11 @@
 
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+local TextService = game:GetService("TextService")
 local Players = game:GetService("Players")
 
 local AetherUI = {}
-AetherUI.Version = "1.0.0"
+AetherUI.Version = "1.1.0"
 
 local Window = {}
 Window.__index = Window
@@ -31,15 +32,18 @@ Tab.__index = Tab
 -- Tema e constantes
 ----------------------------------------------------------------
 local Theme = {
-	Background = Color3.fromRGB(22, 22, 28),
-	Surface = Color3.fromRGB(30, 30, 38),
-	Element = Color3.fromRGB(40, 40, 50),
-	ElementHover = Color3.fromRGB(52, 52, 64),
-	Off = Color3.fromRGB(68, 68, 84),
+	Background = Color3.fromRGB(18, 18, 24),
+	Surface = Color3.fromRGB(26, 26, 34),
+	Element = Color3.fromRGB(36, 36, 47),
+	ElementHover = Color3.fromRGB(47, 47, 61),
+	Off = Color3.fromRGB(64, 64, 82),
 	Accent = Color3.fromRGB(124, 92, 255),
+	AccentLight = Color3.fromRGB(166, 138, 255),
+	Stroke = Color3.fromRGB(58, 58, 76),
 	Text = Color3.fromRGB(240, 240, 248),
 	SubText = Color3.fromRGB(150, 150, 168),
 	Danger = Color3.fromRGB(235, 87, 87),
+	White = Color3.fromRGB(255, 255, 255),
 	Font = Enum.Font.GothamMedium,
 	FontBold = Enum.Font.GothamBold,
 }
@@ -100,6 +104,16 @@ local function addPadding(parent, left, top, right, bottom)
 	})
 end
 
+local function addStroke(parent, color, transparency, thickness)
+	return create("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Color = color or Theme.Stroke,
+		Transparency = transparency or 0,
+		Thickness = thickness or 1,
+		Parent = parent,
+	})
+end
+
 local function safeCall(callback, ...)
 	if typeof(callback) ~= "function" then
 		return
@@ -140,7 +154,45 @@ local function getWindowSize()
 	local viewport = getViewport()
 	local width = math.clamp(math.floor(viewport.X * 0.92), 260, 520)
 	local height = math.clamp(math.floor(viewport.Y * 0.78), 240, 360)
+	width = math.min(width, math.max(math.floor(viewport.X) - 12, 200))
+	height = math.min(height, math.max(math.floor(viewport.Y) - 12, 180))
 	return UDim2.fromOffset(width, height)
+end
+
+local function textWidth(text, size, font)
+	local ok, bounds = pcall(function()
+		return TextService:GetTextSize(text, size, font, Vector2.new(1000, 100))
+	end)
+	if ok and bounds then
+		return math.ceil(bounds.X)
+	end
+	return math.ceil(#text * size * 0.62)
+end
+
+local function bindCanvas(scroll, layout, axis, extra)
+	local function update()
+		local content = layout.AbsoluteContentSize
+		if axis == "X" then
+			scroll.CanvasSize = UDim2.fromOffset(content.X + extra, 0)
+		else
+			scroll.CanvasSize = UDim2.fromOffset(0, content.Y + extra)
+		end
+	end
+	layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(update)
+	update()
+	return update
+end
+
+local function resolveParent()
+	local ok, hidden = pcall(function()
+		return gethui()
+	end)
+	if ok and typeof(hidden) == "Instance" then
+		return hidden
+	end
+	local player = Players.LocalPlayer
+	assert(player, "[AetherUI] CreateWindow deve ser chamado a partir de um LocalScript.")
+	return player:WaitForChild("PlayerGui")
 end
 
 -- Mantem a janela inteira dentro da tela (posicao com AnchorPoint 0.5, 0.5).
@@ -247,6 +299,79 @@ function Tab:_nextOrder()
 	return self._order
 end
 
+function Tab:_refresh()
+	if self._updateCanvas then
+		self._updateCanvas()
+	end
+end
+
+function Tab:AddSection(text)
+	local m = self._metrics
+
+	local holder = create("Frame", {
+		Name = "Section",
+		LayoutOrder = self:_nextOrder(),
+		Size = UDim2.new(1, 0, 0, 22),
+		BackgroundTransparency = 1,
+		Parent = self._page,
+	})
+
+	local label = create("TextLabel", {
+		Name = "Label",
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 1, 0),
+		Text = string.upper(tostring(text or "Section")),
+		Font = Theme.FontBold,
+		TextSize = m.Text - 2,
+		TextColor3 = Theme.SubText,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Parent = holder,
+	})
+	addPadding(label, 4, 0, 0, 0)
+
+	local object = { Instance = holder }
+
+	function object:SetText(newText)
+		label.Text = string.upper(tostring(newText))
+	end
+
+	return object
+end
+
+function Tab:AddLabel(config)
+	if typeof(config) == "string" then
+		config = { Text = config }
+	end
+	config = config or {}
+	local m = self._metrics
+
+	local label = create("TextLabel", {
+		Name = "Label",
+		LayoutOrder = self:_nextOrder(),
+		Size = UDim2.new(1, 0, 0, m.Row - 4),
+		BackgroundColor3 = Theme.Surface,
+		Text = tostring(config.Text or config.Name or "Label"),
+		Font = Theme.Font,
+		TextSize = m.Text,
+		TextColor3 = Theme.SubText,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Parent = self._page,
+	})
+	addCorner(label, 8)
+	addPadding(label, 12, 0, 12, 0)
+	addStroke(label, Theme.Stroke, 0.6, 1)
+
+	local object = { Instance = label }
+
+	function object:SetText(newText)
+		label.Text = tostring(newText)
+	end
+
+	return object
+end
+
 function Tab:AddButton(config)
 	config = config or {}
 	local m = self._metrics
@@ -264,16 +389,19 @@ function Tab:AddButton(config)
 		Parent = self._page,
 	})
 	addCorner(button, 8)
+	local stroke = addStroke(button, Theme.Stroke, 0.5, 1)
 	local scale = create("UIScale", { Parent = button })
 
 	local hovering = false
 	button.MouseEnter:Connect(function()
 		hovering = true
 		tween(button, Anim.Fast, { BackgroundColor3 = Theme.ElementHover })
+		tween(stroke, Anim.Fast, { Color = Theme.Accent, Transparency = 0.2 })
 	end)
 	button.MouseLeave:Connect(function()
 		hovering = false
 		tween(button, Anim.Fast, { BackgroundColor3 = Theme.Element })
+		tween(stroke, Anim.Fast, { Color = Theme.Stroke, Transparency = 0.5 })
 		tween(scale, Anim.Fast, { Scale = 1 })
 	end)
 	button.MouseButton1Down:Connect(function()
@@ -282,13 +410,19 @@ function Tab:AddButton(config)
 	end)
 	button.MouseButton1Up:Connect(function()
 		tween(button, Anim.Fast, { BackgroundColor3 = hovering and Theme.ElementHover or Theme.Element })
-		tween(scale, Anim.Fast, { Scale = 1 })
+		tween(scale, Anim.Fast, { Scale = 1 }, Enum.EasingStyle.Back)
 	end)
 	button.Activated:Connect(function()
 		safeCall(config.Callback)
 	end)
 
-	return { Instance = button }
+	local object = { Instance = button }
+
+	function object:SetText(newText)
+		button.Text = tostring(newText)
+	end
+
+	return object
 end
 
 function Tab:AddToggle(config)
@@ -306,6 +440,7 @@ function Tab:AddToggle(config)
 		Parent = self._page,
 	})
 	addCorner(row, 8)
+	local stroke = addStroke(row, Theme.Stroke, 0.5, 1)
 
 	create("TextLabel", {
 		Name = "Label",
@@ -336,7 +471,7 @@ function Tab:AddToggle(config)
 		AnchorPoint = Vector2.new(0, 0.5),
 		Position = state and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
 		Size = UDim2.fromOffset(16, 16),
-		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		BackgroundColor3 = Theme.White,
 		Parent = switch,
 	})
 	create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = knob })
@@ -348,6 +483,15 @@ function Tab:AddToggle(config)
 		tween(knob, Anim.Normal, {
 			Position = state and UDim2.new(1, -19, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
 		}, Enum.EasingStyle.Back)
+		tween(stroke, Anim.Normal, {
+			Color = state and Theme.Accent or Theme.Stroke,
+			Transparency = state and 0.35 or 0.5,
+		})
+	end
+
+	if state then
+		stroke.Color = Theme.Accent
+		stroke.Transparency = 0.35
 	end
 
 	function object:Set(value)
@@ -408,6 +552,7 @@ function Tab:AddSlider(config)
 		Parent = self._page,
 	})
 	addCorner(holder, 8)
+	addStroke(holder, Theme.Stroke, 0.5, 1)
 
 	create("TextLabel", {
 		Name = "Label",
@@ -450,20 +595,26 @@ function Tab:AddSlider(config)
 	local fill = create("Frame", {
 		Name = "Fill",
 		Size = UDim2.new(0, 0, 1, 0),
-		BackgroundColor3 = Theme.Accent,
+		BackgroundColor3 = Theme.White,
 		Parent = track,
 	})
 	create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = fill })
+	create("UIGradient", {
+		Color = ColorSequence.new(Theme.Accent, Theme.AccentLight),
+		Parent = fill,
+	})
 
 	local knob = create("Frame", {
 		Name = "Knob",
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.new(0, 0, 0.5, 0),
 		Size = UDim2.fromOffset(14, 14),
-		BackgroundColor3 = Color3.fromRGB(255, 255, 255),
+		BackgroundColor3 = Theme.White,
+		ZIndex = 2,
 		Parent = track,
 	})
 	create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = knob })
+	addStroke(knob, Theme.Accent, 0.4, 2)
 
 	-- Area de toque ampliada (facilita o uso no celular).
 	local hit = create("TextButton", {
@@ -474,6 +625,7 @@ function Tab:AddSlider(config)
 		Size = UDim2.new(1, 0, 0, 34),
 		Text = "",
 		AutoButtonColor = false,
+		ZIndex = 3,
 		Parent = holder,
 	})
 
@@ -527,6 +679,7 @@ function Tab:AddSlider(config)
 		dragging = false
 		self._page.ScrollingEnabled = true
 		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(14, 14) })
+		tween(valueLabel, Anim.Fast, { TextColor3 = Theme.SubText })
 	end
 
 	hit.InputBegan:Connect(function(input)
@@ -536,6 +689,7 @@ function Tab:AddSlider(config)
 		dragging = true
 		self._page.ScrollingEnabled = false
 		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(18, 18) })
+		tween(valueLabel, Anim.Fast, { TextColor3 = Theme.AccentLight })
 		updateFromInput(input)
 	end)
 
@@ -565,52 +719,90 @@ function Window:_selectTab(tab, animate)
 	self._selectedTab = tab
 	for _, other in ipairs(self._tabs) do
 		local active = other == tab
-		other._page.Visible = active
+		if not active then
+			other._holder.Visible = false
+		end
 		tween(other._button, Anim.Fast, {
 			BackgroundColor3 = active and Theme.Accent or Theme.Element,
 			TextColor3 = active and Theme.Text or Theme.SubText,
 		})
+		tween(other._buttonStroke, Anim.Fast, {
+			Transparency = active and 1 or 0.5,
+		})
 	end
+
+	local holder = tab._holder
+	holder.Visible = true
+	tab:_refresh()
 	if animate then
-		tab._page.Position = UDim2.fromOffset(0, 10)
-		tween(tab._page, Anim.Normal, { Position = UDim2.fromOffset(0, 0) })
+		holder.Position = UDim2.fromOffset(0, 12)
+		holder.GroupTransparency = 1
+		tween(holder, Anim.Normal, {
+			Position = UDim2.fromOffset(0, 0),
+			GroupTransparency = 0,
+		})
+	else
+		holder.Position = UDim2.fromOffset(0, 0)
+		holder.GroupTransparency = 0
 	end
 end
 
 function Window:AddTab(name)
 	local m = self._metrics
 	local index = #self._tabs + 1
+	local label = tostring(name or "Tab")
 
 	local button = create("TextButton", {
 		Name = "Tab_" .. tostring(name),
 		LayoutOrder = index,
-		AutomaticSize = Enum.AutomaticSize.X,
-		Size = UDim2.new(0, 0, 0, m.TabBar - 10),
+		Size = UDim2.fromOffset(textWidth(label, m.Text, Theme.Font) + 28, m.TabBar - 10),
 		BackgroundColor3 = Theme.Element,
 		AutoButtonColor = false,
-		Text = tostring(name or "Tab"),
+		Text = label,
 		Font = Theme.Font,
 		TextSize = m.Text,
 		TextColor3 = Theme.SubText,
 		Parent = self._tabBar,
 	})
 	addCorner(button, 8)
-	addPadding(button, 14, 0, 14, 0)
+	local buttonStroke = addStroke(button, Theme.Stroke, 0.5, 1)
 
-	local page = create("ScrollingFrame", {
+	button.MouseEnter:Connect(function()
+		if self._selectedTab and self._selectedTab._button == button then
+			return
+		end
+		tween(button, Anim.Fast, { BackgroundColor3 = Theme.ElementHover })
+	end)
+	button.MouseLeave:Connect(function()
+		if self._selectedTab and self._selectedTab._button == button then
+			return
+		end
+		tween(button, Anim.Fast, { BackgroundColor3 = Theme.Element })
+	end)
+
+	local holder = create("CanvasGroup", {
 		Name = "Page_" .. tostring(name),
 		BackgroundTransparency = 1,
 		Size = UDim2.new(1, 0, 1, 0),
-		CanvasSize = UDim2.new(0, 0, 0, 0),
-		AutomaticCanvasSize = Enum.AutomaticSize.Y,
-		ScrollingDirection = Enum.ScrollingDirection.Y,
-		ScrollBarThickness = 3,
-		ScrollBarImageColor3 = Theme.Accent,
+		GroupTransparency = 1,
 		Visible = false,
 		Parent = self._content,
 	})
+
+	local page = create("ScrollingFrame", {
+		Name = "Scroll",
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 1, 0),
+		CanvasSize = UDim2.new(0, 0, 0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.None,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		ScrollBarThickness = 3,
+		ScrollBarImageColor3 = Theme.Accent,
+		VerticalScrollBarInset = Enum.ScrollBarInset.None,
+		Parent = holder,
+	})
 	addPadding(page, 10, 10, 10, 10)
-	create("UIListLayout", {
+	local layout = create("UIListLayout", {
 		Padding = UDim.new(0, 8),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 		Parent = page,
@@ -619,11 +811,14 @@ function Window:AddTab(name)
 	local tab = setmetatable({
 		_window = self,
 		_page = page,
+		_holder = holder,
 		_button = button,
+		_buttonStroke = buttonStroke,
 		_metrics = m,
 		_connections = self._connections,
 		_order = 0,
 	}, Tab)
+	tab._updateCanvas = bindCanvas(page, layout, "Y", 20)
 
 	table.insert(self._tabs, tab)
 
@@ -638,14 +833,31 @@ function Window:AddTab(name)
 	return tab
 end
 
+function Window:SetTitle(text)
+	if self._titleLabel then
+		self._titleLabel.Text = tostring(text)
+	end
+end
+
 function Window:_showBall()
 	self._ball.Visible = true
 	self._ballScale.Scale = 0
 	tween(self._ballScale, Anim.Normal + 0.05, { Scale = 1 }, Enum.EasingStyle.Back)
+
+	if self._pulse then
+		self._pulse:Cancel()
+	end
+	self._ballStroke.Transparency = 0.7
+	self._pulse = TweenService:Create(
+		self._ballStroke,
+		TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ Transparency = 0.2 }
+	)
+	self._pulse:Play()
 end
 
 function Window:Minimize()
-	if self._state ~= "Open" then
+	if self._state ~= "Open" and self._state ~= "Opening" then
 		return
 	end
 	self._state = "Minimizing"
@@ -675,6 +887,11 @@ function Window:Restore()
 	self._state = "Restoring"
 	local root = self._root
 	local ballPosition = self._ball.Position
+
+	if self._pulse then
+		self._pulse:Cancel()
+		self._pulse = nil
+	end
 
 	local t = tween(self._ballScale, Anim.Fast, { Scale = 0 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
 	t.Completed:Connect(function(playbackState)
@@ -736,6 +953,10 @@ function Window:Destroy()
 		self._cameraConnection:Disconnect()
 		self._cameraConnection = nil
 	end
+	if self._pulse then
+		self._pulse:Cancel()
+		self._pulse = nil
+	end
 	if self._gui then
 		self._gui:Destroy()
 	end
@@ -771,13 +992,17 @@ end
 ----------------------------------------------------------------
 -- API publica
 ----------------------------------------------------------------
--- config: Title (string), OnClose (function opcional)
+-- config: Title (string), Name (string opcional), OnClose (function opcional)
 function AetherUI.CreateWindow(config)
 	config = config or {}
 
-	local player = Players.LocalPlayer
-	assert(player, "[AetherUI] CreateWindow deve ser chamado a partir de um LocalScript.")
-	local playerGui = player:WaitForChild("PlayerGui")
+	local guiParent = resolveParent()
+	local guiName = tostring(config.Name or "AetherUI")
+
+	local previous = guiParent:FindFirstChild(guiName)
+	if previous and previous:IsA("ScreenGui") then
+		previous:Destroy()
+	end
 
 	local self = setmetatable({}, Window)
 	local m = getMetrics()
@@ -789,12 +1014,12 @@ function AetherUI.CreateWindow(config)
 	self._onClose = config.OnClose
 
 	local gui = create("ScreenGui", {
-		Name = "AetherUI",
+		Name = guiName,
 		ResetOnSpawn = false,
 		IgnoreGuiInset = true,
 		DisplayOrder = 1000,
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-		Parent = playerGui,
+		Parent = guiParent,
 	})
 	self._gui = gui
 
@@ -817,16 +1042,31 @@ function AetherUI.CreateWindow(config)
 	local titleBar = create("Frame", {
 		Name = "TitleBar",
 		Size = UDim2.new(1, 0, 0, m.Title),
-		BackgroundColor3 = Theme.Surface,
+		BackgroundColor3 = Theme.White,
 		Parent = root,
 	})
+	create("UIGradient", {
+		Color = ColorSequence.new(Color3.fromRGB(36, 36, 47), Theme.Surface),
+		Rotation = 90,
+		Parent = titleBar,
+	})
+
+	local titleDot = create("Frame", {
+		Name = "Dot",
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 14, 0.5, 0),
+		Size = UDim2.fromOffset(8, 8),
+		BackgroundColor3 = Theme.Accent,
+		Parent = titleBar,
+	})
+	create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = titleDot })
 
 	local buttonsWidth = m.TitleButton * 2 + 8 + 6 + 8
 	local titleLabel = create("TextLabel", {
 		Name = "Title",
 		BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(14, 0),
-		Size = UDim2.new(1, -(buttonsWidth + 14), 1, 0),
+		Position = UDim2.fromOffset(30, 0),
+		Size = UDim2.new(1, -(buttonsWidth + 30), 1, 0),
 		Text = tostring(config.Title or "AetherUI"),
 		Font = Theme.FontBold,
 		TextSize = m.Text + 2,
@@ -836,6 +1076,7 @@ function AetherUI.CreateWindow(config)
 		Active = true,
 		Parent = titleBar,
 	})
+	self._titleLabel = titleLabel
 
 	create("Frame", {
 		Name = "Divider",
@@ -844,6 +1085,28 @@ function AetherUI.CreateWindow(config)
 		Size = UDim2.new(1, 0, 0, 1),
 		BackgroundColor3 = Theme.Element,
 		Parent = titleBar,
+	})
+
+	local accentLine = create("Frame", {
+		Name = "AccentLine",
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 0, 1, 0),
+		Size = UDim2.new(1, 0, 0, 1),
+		BackgroundColor3 = Theme.White,
+		Parent = titleBar,
+	})
+	create("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Theme.Accent),
+			ColorSequenceKeypoint.new(0.5, Theme.AccentLight),
+			ColorSequenceKeypoint.new(1, Theme.Accent),
+		}),
+		Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(0.5, 0.1),
+			NumberSequenceKeypoint.new(1, 1),
+		}),
+		Parent = accentLine,
 	})
 
 	local function makeTitleButton(text, offsetX, hoverColor)
@@ -860,11 +1123,19 @@ function AetherUI.CreateWindow(config)
 			Parent = titleBar,
 		})
 		addCorner(button, 6)
+		local buttonScale = create("UIScale", { Parent = button })
 		button.MouseEnter:Connect(function()
 			tween(button, Anim.Fast, { BackgroundColor3 = hoverColor })
 		end)
 		button.MouseLeave:Connect(function()
 			tween(button, Anim.Fast, { BackgroundColor3 = Theme.Element })
+			tween(buttonScale, Anim.Fast, { Scale = 1 })
+		end)
+		button.MouseButton1Down:Connect(function()
+			tween(buttonScale, 0.08, { Scale = 0.9 })
+		end)
+		button.MouseButton1Up:Connect(function()
+			tween(buttonScale, Anim.Fast, { Scale = 1 }, Enum.EasingStyle.Back)
 		end)
 		return button
 	end
@@ -886,19 +1157,20 @@ function AetherUI.CreateWindow(config)
 		Position = UDim2.fromOffset(0, m.Title),
 		Size = UDim2.new(1, 0, 0, m.TabBar),
 		CanvasSize = UDim2.new(0, 0, 0, 0),
-		AutomaticCanvasSize = Enum.AutomaticSize.X,
+		AutomaticCanvasSize = Enum.AutomaticSize.None,
 		ScrollingDirection = Enum.ScrollingDirection.X,
 		ScrollBarThickness = 0,
 		Parent = root,
 	})
 	addPadding(tabBar, 10, 0, 10, 0)
-	create("UIListLayout", {
+	local tabLayout = create("UIListLayout", {
 		FillDirection = Enum.FillDirection.Horizontal,
 		VerticalAlignment = Enum.VerticalAlignment.Center,
 		Padding = UDim.new(0, 6),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 		Parent = tabBar,
 	})
+	bindCanvas(tabBar, tabLayout, "X", 20)
 	self._tabBar = tabBar
 
 	local content = create("Frame", {
@@ -910,6 +1182,18 @@ function AetherUI.CreateWindow(config)
 		Parent = root,
 	})
 	self._content = content
+
+	local border = create("Frame", {
+		Name = "Border",
+		BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(1, 1),
+		Size = UDim2.new(1, -2, 1, -2),
+		ZIndex = 10,
+		Active = false,
+		Parent = root,
+	})
+	addCorner(border, 11)
+	addStroke(border, Theme.Stroke, 0.35, 1)
 
 	-- Bola flutuante (janela minimizada)
 	local viewport = getViewport()
@@ -928,9 +1212,9 @@ function AetherUI.CreateWindow(config)
 		Parent = gui,
 	})
 	create("UICorner", { CornerRadius = UDim.new(1, 0), Parent = ball })
-	create("UIStroke", {
+	self._ballStroke = create("UIStroke", {
 		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-		Color = Color3.fromRGB(255, 255, 255),
+		Color = Theme.AccentLight,
 		Transparency = 0.7,
 		Thickness = 2,
 		Parent = ball,
@@ -940,6 +1224,11 @@ function AetherUI.CreateWindow(config)
 
 	-- Arrastar janela pelo titulo e bola pela tela (clique na bola = restaurar)
 	makeDraggable(titleLabel, root, self._connections, {
+		Clamp = function(position)
+			return clampWindowPosition(position, root.Size)
+		end,
+	})
+	makeDraggable(titleBar, root, self._connections, {
 		Clamp = function(position)
 			return clampWindowPosition(position, root.Size)
 		end,
