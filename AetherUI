@@ -51,21 +51,22 @@ Tab.__index = Tab
 -- Tema, estado e constantes
 ----------------------------------------------------------------
 local Theme = {
-	Background = Color3.fromRGB(13, 13, 16),
-	Sidebar = Color3.fromRGB(17, 17, 21),
-	Surface = Color3.fromRGB(21, 21, 26),
-	Element = Color3.fromRGB(27, 27, 33),
-	ElementHover = Color3.fromRGB(37, 37, 45),
-	Off = Color3.fromRGB(54, 54, 63),
-	Stroke = Color3.fromRGB(44, 44, 53),
-	Divider = Color3.fromRGB(30, 30, 37),
-	Text = Color3.fromRGB(236, 236, 241),
-	SubText = Color3.fromRGB(146, 146, 158),
-	Muted = Color3.fromRGB(96, 96, 108),
+	Background = Color3.fromRGB(12, 12, 15),
+	Sidebar = Color3.fromRGB(16, 16, 20),
+	Surface = Color3.fromRGB(20, 20, 25),
+	Element = Color3.fromRGB(26, 26, 32),
+	ElementHover = Color3.fromRGB(35, 35, 43),
+	Off = Color3.fromRGB(50, 50, 59),
+	Stroke = Color3.fromRGB(42, 42, 51),
+	Divider = Color3.fromRGB(28, 28, 35),
+	Text = Color3.fromRGB(238, 238, 243),
+	SubText = Color3.fromRGB(148, 148, 161),
+	Muted = Color3.fromRGB(100, 100, 113),
 	Danger = Color3.fromRGB(235, 87, 87),
 	Success = Color3.fromRGB(72, 199, 128),
 	Warning = Color3.fromRGB(240, 178, 64),
 	White = Color3.fromRGB(255, 255, 255),
+	Black = Color3.fromRGB(0, 0, 0),
 	Font = Enum.Font.GothamMedium,
 	FontBold = Enum.Font.GothamBold,
 }
@@ -199,6 +200,77 @@ local function addStroke(parent, color, transparency, thickness)
 	})
 end
 
+local ShadowLayers = {
+	{ Grow = 3, Alpha = 0.85 },
+	{ Grow = 8, Alpha = 0.91 },
+	{ Grow = 15, Alpha = 0.95 },
+	{ Grow = 24, Alpha = 0.975 },
+}
+
+local function attachShadow(target, parent, corner, scaleObject, connections)
+	local container = create("Frame", {
+		Name = "Shadow",
+		AnchorPoint = target.AnchorPoint,
+		BackgroundTransparency = 1,
+		ZIndex = 0,
+		Parent = parent,
+	})
+	local containerScale = nil
+	if scaleObject then
+		containerScale = create("UIScale", { Parent = container })
+	end
+	local layers = {}
+	for _, spec in ipairs(ShadowLayers) do
+		local layer = create("Frame", {
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.new(1, spec.Grow * 2, 1, spec.Grow * 2),
+			BackgroundColor3 = Theme.Black,
+			BackgroundTransparency = spec.Alpha,
+			Parent = container,
+		})
+		addCorner(layer, corner + spec.Grow)
+		table.insert(layers, { Frame = layer, Alpha = spec.Alpha })
+	end
+
+	local function sync()
+		local position = target.Position
+		container.Position = UDim2.new(
+			position.X.Scale,
+			position.X.Offset,
+			position.Y.Scale,
+			position.Y.Offset + 6
+		)
+		container.Size = target.Size
+		container.Visible = target.Visible and not State.LowPerformance
+		if containerScale then
+			containerScale.Scale = scaleObject.Scale
+		end
+		local groupTransparency = target.GroupTransparency
+		for _, layer in ipairs(layers) do
+			layer.Frame.BackgroundTransparency = 1 - (1 - layer.Alpha) * (1 - groupTransparency)
+		end
+	end
+
+	local function watch(instance, property)
+		local connection = instance:GetPropertyChangedSignal(property):Connect(sync)
+		if connections then
+			table.insert(connections, connection)
+		end
+	end
+
+	watch(target, "Position")
+	watch(target, "Size")
+	watch(target, "Visible")
+	watch(target, "GroupTransparency")
+	if scaleObject then
+		watch(scaleObject, "Scale")
+	end
+	sync()
+
+	return { Instance = container, Sync = sync }
+end
+
 local function safeCall(callback, ...)
 	if typeof(callback) ~= "function" then
 		return
@@ -238,22 +310,22 @@ local function computeMetrics(compact)
 	local m = {}
 	m.Mobile = mobile
 	m.Compact = c
-	m.Row = c and (mobile and 34 or 30) or (mobile and 42 or 36)
-	m.Title = c and (mobile and 36 or 32) or (mobile and 44 or 40)
+	m.Row = c and (mobile and 36 or 32) or (mobile and 44 or 38)
+	m.Title = c and (mobile and 38 or 34) or (mobile and 46 or 42)
 	m.Text = c and (mobile and 13 or 12) or (mobile and 15 or 14)
 	m.Ball = c and (mobile and 46 or 40) or (mobile and 56 or 48)
 	m.TitleButton = c and (mobile and 28 or 24) or (mobile and 32 or 28)
 	m.Icon = c and 13 or (mobile and 17 or 16)
-	m.SideRow = c and (mobile and 34 or 30) or (mobile and 40 or 36)
-	m.SideWidth = c and (mobile and 104 or 112) or (mobile and 120 or 140)
-	m.SidePad = 6
+	m.SideRow = c and (mobile and 36 or 32) or (mobile and 42 or 38)
+	m.SideWidth = c and (mobile and 108 or 116) or (mobile and 128 or 148)
+	m.SidePad = 8
 	m.SideGap = c and 3 or 4
-	m.Pad = c and 8 or 10
-	m.Gap = c and 6 or 8
-	m.Header = c and 24 or 28
-	m.SwitchW = c and 34 or 40
-	m.SwitchH = c and 18 or 22
-	m.Swatch = c and 20 or 24
+	m.Pad = c and 10 or 12
+	m.Gap = c and 7 or 9
+	m.Header = c and 26 or 30
+	m.SwitchW = c and 36 or 42
+	m.SwitchH = c and 20 or 24
+	m.Swatch = c and 22 or 26
 	return m
 end
 
@@ -859,8 +931,8 @@ function AetherUI.Notify(first, second)
 		iconSpec = style.Icon
 	end
 
-	local iconColumn = 44
-	local rightMargin = 30
+	local iconColumn = 48
+	local rightMargin = 28
 	local textWidth = width - iconColumn - rightMargin
 	local titleHeight = textSize + 4
 	local contentHeight = 0
@@ -883,7 +955,7 @@ function AetherUI.Notify(first, second)
 		Name = "Notification",
 		LayoutOrder = Notifications.Counter,
 		BackgroundTransparency = 1,
-		Size = UDim2.new(1, 0, 0, height),
+		Size = UDim2.new(1, 0, 0, 0),
 		Parent = Notifications.Holder,
 	})
 
@@ -891,23 +963,39 @@ function AetherUI.Notify(first, second)
 		Name = "Card",
 		BackgroundColor3 = Theme.Surface,
 		Position = UDim2.fromOffset(48, 0),
-		Size = UDim2.new(1, 0, 1, 0),
+		Size = UDim2.new(1, 0, 0, height),
 		GroupTransparency = 1,
 		Parent = slot,
 	})
-	addCorner(card, 10)
-	addStroke(card, Theme.Stroke, 0.2, 1)
+	addCorner(card, 12)
+	addStroke(card, Theme.Stroke, 0.25, 1)
+	attachShadow(card, slot, 12)
 
 	local bar = create("Frame", {
 		Name = "Accent",
-		Size = UDim2.new(0, 3, 1, 0),
+		Size = UDim2.new(0, 2, 1, 0),
 		BackgroundColor3 = color,
+		BackgroundTransparency = 0.25,
 		Parent = card,
 	})
 
-	local icon = createIcon(iconSpec, card, 18, color)
-	if icon then
-		icon.Instance.Position = UDim2.fromOffset(16, 13)
+	local icon = nil
+	if iconSpec ~= nil and iconSpec ~= "" and iconSpec ~= false then
+		local badge = create("Frame", {
+			Name = "Badge",
+			Position = UDim2.fromOffset(12, 12),
+			Size = UDim2.fromOffset(26, 26),
+			BackgroundColor3 = Theme.Surface:Lerp(color, 0.16),
+			Parent = card,
+		})
+		addCorner(badge, 8)
+		icon = createIcon(iconSpec, badge, 15, color)
+		if icon then
+			icon.Instance.AnchorPoint = Vector2.new(0.5, 0.5)
+			icon.Instance.Position = UDim2.fromScale(0.5, 0.5)
+		else
+			badge:Destroy()
+		end
 	end
 
 	create("TextLabel", {
@@ -955,7 +1043,7 @@ function AetherUI.Notify(first, second)
 			Position = UDim2.new(0, 0, 1, 0),
 			Size = UDim2.new(1, 0, 0, 2),
 			BackgroundColor3 = color,
-			BackgroundTransparency = 0.45,
+			BackgroundTransparency = 0.55,
 			Parent = card,
 		})
 	end
@@ -1012,6 +1100,7 @@ function AetherUI.Notify(first, second)
 		dismiss()
 	end)
 
+	tween(slot, Anim.Normal, { Size = UDim2.new(1, 0, 0, height) })
 	tween(card, Anim.Slow, {
 		Position = UDim2.fromOffset(0, 0),
 		GroupTransparency = 0,
@@ -1138,7 +1227,7 @@ function Tab:AddLabel(config)
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		Parent = self._page,
 	})
-	addCorner(label, 8)
+	addCorner(label, 10)
 	local padding = addPadding(label, 12, 0, 12, 0)
 	addStroke(label, Theme.Stroke, 0.5, 1)
 
@@ -1191,7 +1280,7 @@ function Tab:AddButton(config)
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		Parent = self._page,
 	})
-	addCorner(button, 8)
+	addCorner(button, 10)
 	local stroke = addStroke(button, Theme.Stroke, 0.35, 1)
 	local scale = create("UIScale", { Parent = button })
 	local padding = addPadding(button, 14, 0, 14, 0)
@@ -1223,7 +1312,7 @@ function Tab:AddButton(config)
 	button.MouseEnter:Connect(function()
 		hovering = true
 		tween(button, Anim.Fast, { BackgroundColor3 = Theme.ElementHover })
-		tween(stroke, Anim.Fast, { Color = accent(), Transparency = 0.45 })
+		tween(stroke, Anim.Fast, { Color = accent(), Transparency = 0.6 })
 		chevron:Tween(accentLight(), Anim.Fast)
 		if lead then
 			lead:Tween(Theme.Text, Anim.Fast)
@@ -1275,7 +1364,7 @@ function Tab:AddToggle(config)
 		Text = "",
 		Parent = self._page,
 	})
-	addCorner(row, 8)
+	addCorner(row, 10)
 	local stroke = addStroke(row, Theme.Stroke, 0.35, 1)
 
 	local lead = createIcon(config.Icon, row, m.Icon, Theme.SubText)
@@ -1331,7 +1420,7 @@ function Tab:AddToggle(config)
 		}
 		setProps(switch, props, animate, Anim.Normal)
 		if animate then
-			tween(knob, Anim.Normal, { Position = knobPosition() }, Enum.EasingStyle.Back)
+			tween(knob, Anim.Normal, { Position = knobPosition() })
 		else
 			knob.Position = knobPosition()
 		end
@@ -1387,11 +1476,19 @@ function Tab:AddToggle(config)
 		label.Text = tostring(newText)
 	end
 
+	local rowScale = create("UIScale", { Parent = row })
 	row.MouseEnter:Connect(function()
 		tween(row, Anim.Fast, { BackgroundColor3 = Theme.ElementHover })
 	end)
 	row.MouseLeave:Connect(function()
 		tween(row, Anim.Fast, { BackgroundColor3 = Theme.Element })
+		tween(rowScale, Anim.Fast, { Scale = 1 })
+	end)
+	row.MouseButton1Down:Connect(function()
+		tween(rowScale, 0.08, { Scale = 0.985 })
+	end)
+	row.MouseButton1Up:Connect(function()
+		tween(rowScale, Anim.Fast, { Scale = 1 }, Enum.EasingStyle.Back)
 	end)
 	row.Activated:Connect(function()
 		object:Set(not state)
@@ -1430,7 +1527,7 @@ function Tab:AddSlider(config)
 		BackgroundColor3 = Theme.Element,
 		Parent = self._page,
 	})
-	addCorner(holder, 8)
+	addCorner(holder, 10)
 	addStroke(holder, Theme.Stroke, 0.35, 1)
 
 	local lead = createIcon(config.Icon, holder, m.Icon, Theme.SubText)
@@ -1471,7 +1568,7 @@ function Tab:AddSlider(config)
 		Name = "Track",
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.new(0.5, 0, 1, -16),
-		Size = UDim2.new(1, -28, 0, 4),
+		Size = UDim2.new(1, -28, 0, 5),
 		BackgroundColor3 = Theme.Off,
 		Parent = holder,
 	})
@@ -1499,6 +1596,13 @@ function Tab:AddSlider(config)
 		Parent = track,
 	})
 	addCornerScale(knob, 0.5)
+	local knobHalo = create("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Color = accent(),
+		Thickness = 3,
+		Transparency = 1,
+		Parent = knob,
+	})
 
 	local hit = create("TextButton", {
 		Name = "Hit",
@@ -1547,6 +1651,7 @@ function Tab:AddSlider(config)
 
 	win:_onAccent(function(animate)
 		setProps(fill, { BackgroundColor3 = accent() }, animate, Anim.Normal)
+		setProps(knobHalo, { Color = accent() }, animate, Anim.Normal)
 		if dragging then
 			valueLabel.TextColor3 = accentLight()
 		end
@@ -1584,6 +1689,7 @@ function Tab:AddSlider(config)
 		dragging = false
 		self._page.ScrollingEnabled = true
 		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(knobBase(), knobBase()) })
+		tween(knobHalo, Anim.Fast, { Transparency = 1 })
 		tween(valueLabel, Anim.Fast, { TextColor3 = Theme.SubText })
 	end
 
@@ -1594,6 +1700,7 @@ function Tab:AddSlider(config)
 		dragging = true
 		self._page.ScrollingEnabled = false
 		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(knobBase() + 4, knobBase() + 4) })
+		tween(knobHalo, Anim.Fast, { Transparency = 0.6 })
 		tween(valueLabel, Anim.Fast, { TextColor3 = accentLight() })
 		updateFromInput(input)
 	end)
@@ -1631,7 +1738,7 @@ function Tab:AddColorPicker(config)
 		BackgroundColor3 = Theme.Element,
 		Parent = self._page,
 	})
-	addCorner(holder, 8)
+	addCorner(holder, 10)
 	addStroke(holder, Theme.Stroke, 0.35, 1)
 
 	local lead = createIcon(config.Icon or "palette", holder, m.Icon, Theme.SubText)
@@ -1681,6 +1788,11 @@ function Tab:AddColorPicker(config)
 		for _, entry in ipairs(swatches) do
 			local selected = value ~= nil and colorsEqual(entry.Color, value)
 			setProps(entry.Stroke, { Transparency = selected and 0 or 1 }, animate, Anim.Fast)
+			if selected and animate and not entry.Selected then
+				entry.Scale.Scale = 0.82
+				tween(entry.Scale, Anim.Normal, { Scale = 1 }, Enum.EasingStyle.Back)
+			end
+			entry.Selected = selected
 		end
 	end
 
@@ -1728,7 +1840,7 @@ function Tab:AddColorPicker(config)
 		swatch.Activated:Connect(function()
 			object:Set(color)
 		end)
-		table.insert(swatches, { Color = color, Stroke = swatchStroke })
+		table.insert(swatches, { Color = color, Stroke = swatchStroke, Scale = swatchScale, Selected = false })
 	end
 
 	win:_onLayout(function()
@@ -2012,6 +2124,9 @@ end
 
 function Window:_applyPerformance()
 	local lowPerformance = State.LowPerformance
+	if self._shadow then
+		self._shadow.Sync()
+	end
 	for _, gradient in ipairs(self._gradients) do
 		gradient.Enabled = not lowPerformance
 	end
@@ -2054,7 +2169,16 @@ function Window:_selectTab(tab, animate)
 	self._selectedTab = tab
 	for _, other in ipairs(self._tabs) do
 		if other ~= tab then
-			other._holder.Visible = false
+			if animate and other == previous and other._holder.Visible then
+				local fade = tween(other._holder, Anim.Fast, { GroupTransparency = 1 })
+				fade.Completed:Connect(function(playbackState)
+					if playbackState == Enum.PlaybackState.Completed and self._selectedTab ~= other then
+						other._holder.Visible = false
+					end
+				end)
+			else
+				other._holder.Visible = false
+			end
 		end
 		other:_paint(animate)
 	end
@@ -2064,10 +2188,15 @@ function Window:_selectTab(tab, animate)
 		direction = -1
 	end
 
+	local metrics = self._metrics
 	self._header.Text = tab._name
 	if animate then
 		self._header.TextTransparency = 1
-		tween(self._header, Anim.Normal, { TextTransparency = 0 })
+		self._header.Position = UDim2.fromOffset(metrics.Pad + 12, 8)
+		tween(self._header, Anim.Normal + 0.05, {
+			TextTransparency = 0,
+			Position = UDim2.fromOffset(metrics.Pad + 4, 8),
+		})
 	else
 		self._header.TextTransparency = 0
 	end
@@ -2076,9 +2205,9 @@ function Window:_selectTab(tab, animate)
 	holder.Visible = true
 	tab:_refresh()
 	if animate then
-		holder.Position = UDim2.fromOffset(0, 14 * direction)
+		holder.Position = UDim2.fromOffset(0, 10 * direction)
 		holder.GroupTransparency = 1
-		tween(holder, Anim.Normal, {
+		tween(holder, Anim.Normal + 0.05, {
 			Position = UDim2.fromOffset(0, 0),
 			GroupTransparency = 0,
 		})
@@ -2114,7 +2243,8 @@ function Window:_createTab(label, iconSpec, isSettings)
 		ZIndex = 2,
 		Parent = self._list,
 	})
-	addCorner(button, 8)
+	addCorner(button, 10)
+	local buttonScale = create("UIScale", { Parent = button })
 
 	local icon = createIcon(iconSpec, button, m.Icon, Theme.SubText)
 	if icon then
@@ -2154,7 +2284,7 @@ function Window:_createTab(label, iconSpec, isSettings)
 		ScrollingDirection = Enum.ScrollingDirection.Y,
 		ScrollBarThickness = 3,
 		ScrollBarImageColor3 = accent(),
-		ScrollBarImageTransparency = 0.3,
+		ScrollBarImageTransparency = 0.45,
 		VerticalScrollBarInset = Enum.ScrollBarInset.None,
 		Parent = holder,
 	})
@@ -2193,6 +2323,13 @@ function Window:_createTab(label, iconSpec, isSettings)
 	button.MouseLeave:Connect(function()
 		tab._hover = false
 		tab:_paint(true)
+		tween(buttonScale, Anim.Fast, { Scale = 1 })
+	end)
+	button.MouseButton1Down:Connect(function()
+		tween(buttonScale, 0.08, { Scale = 0.96 })
+	end)
+	button.MouseButton1Up:Connect(function()
+		tween(buttonScale, Anim.Fast, { Scale = 1 }, Enum.EasingStyle.Back)
 	end)
 	button.Activated:Connect(function()
 		self:_selectTab(tab, true)
@@ -2477,7 +2614,7 @@ function Window:Restore()
 			Position = clampWindowPosition(self._restorePosition, size),
 			GroupTransparency = 0,
 		})
-		local t2 = tween(self._scale, Anim.Slow, { Scale = 1 }, Enum.EasingStyle.Back)
+		local t2 = tween(self._scale, Anim.Slow, { Scale = 1 })
 		t2.Completed:Connect(function(state2)
 			if state2 == Enum.PlaybackState.Completed and self._state == "Restoring" then
 				self._state = "Open"
@@ -2500,7 +2637,7 @@ function Window:Close()
 	end
 
 	tween(self._root, Anim.Normal, { GroupTransparency = 1 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-	local t = tween(self._scale, Anim.Normal, { Scale = 0.85 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	local t = tween(self._scale, Anim.Normal, { Scale = 0.94 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
 	t.Completed:Connect(function()
 		self:Destroy()
 	end)
@@ -2647,16 +2784,17 @@ function AetherUI.CreateWindow(config)
 	local root = create("CanvasGroup", {
 		Name = "Window",
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 10),
 		Size = self:_getSize(),
 		BackgroundColor3 = Theme.Background,
 		GroupTransparency = 1,
 		Parent = gui,
 	})
-	addCorner(root, 12)
-	local rootScale = create("UIScale", { Scale = 0.85, Parent = root })
+	addCorner(root, 14)
+	local rootScale = create("UIScale", { Scale = 0.94, Parent = root })
 	self._root = root
 	self._scale = rootScale
+	self._shadow = attachShadow(root, gui, 14, rootScale, self._connections)
 
 	local titleBar = create("Frame", {
 		Name = "TitleBar",
@@ -2717,7 +2855,7 @@ function AetherUI.CreateWindow(config)
 			Text = "",
 			Parent = titleBar,
 		})
-		addCorner(button, 7)
+		addCorner(button, 8)
 		local buttonScale = create("UIScale", { Parent = button })
 		local icon = createIcon(iconName, button, m.Icon - 2, Theme.SubText)
 		icon.Instance.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -2819,7 +2957,8 @@ function AetherUI.CreateWindow(config)
 		Visible = false,
 		Parent = list,
 	})
-	addCorner(self._highlight, 8)
+	addCorner(self._highlight, 10)
+	self._highlightStroke = addStroke(self._highlight, accent(), 0.82, 1)
 
 	self._indicator = create("Frame", {
 		Name = "Indicator",
@@ -2869,8 +3008,8 @@ function AetherUI.CreateWindow(config)
 		Active = false,
 		Parent = root,
 	})
-	addCorner(border, 11)
-	addStroke(border, Theme.Stroke, 0.2, 1)
+	addCorner(border, 13)
+	addStroke(border, Theme.Stroke, 0.25, 1)
 
 	local viewport = getViewport()
 	local ball = create("TextButton", {
@@ -2897,6 +3036,16 @@ function AetherUI.CreateWindow(config)
 	})
 	self._ball = ball
 	self._ballScale = create("UIScale", { Scale = 0, Parent = ball })
+	ball.MouseEnter:Connect(function()
+		if self._state == "Minimized" then
+			tween(self._ballScale, Anim.Fast, { Scale = 1.08 })
+		end
+	end)
+	ball.MouseLeave:Connect(function()
+		if self._state == "Minimized" then
+			tween(self._ballScale, Anim.Fast, { Scale = 1 })
+		end
+	end)
 
 	makeDraggable(titleLabel, root, self._connections, {
 		Clamp = function(position)
@@ -2919,6 +3068,7 @@ function AetherUI.CreateWindow(config)
 
 	self:_onAccent(function(animate)
 		setProps(self._highlight, { BackgroundColor3 = accentSoft(0.16) }, animate, Anim.Normal)
+		setProps(self._highlightStroke, { Color = accent() }, animate, Anim.Normal)
 		setProps(self._indicator, { BackgroundColor3 = accent() }, animate, Anim.Normal)
 		accentLine.BackgroundColor3 = accent()
 		ball.TextColor3 = accentLight()
@@ -2943,7 +3093,8 @@ function AetherUI.CreateWindow(config)
 	table.insert(Windows, self)
 
 	tween(root, Anim.Normal + 0.05, { GroupTransparency = 0 })
-	local openTween = tween(rootScale, Anim.Slow, { Scale = 1 }, Enum.EasingStyle.Back)
+	tween(root, Anim.Slow + 0.1, { Position = UDim2.fromScale(0.5, 0.5) })
+	local openTween = tween(rootScale, Anim.Slow + 0.1, { Scale = 1 })
 	openTween.Completed:Connect(function(playbackState)
 		if playbackState == Enum.PlaybackState.Completed and self._state == "Opening" then
 			self._state = "Open"
