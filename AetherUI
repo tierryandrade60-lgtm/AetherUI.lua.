@@ -5,6 +5,12 @@
 	        Section e Label, componentes, janela, busca global.
 	Cole TODO este arquivo em um unico ModuleScript.
 
+	v2.3.1:
+	  - Icone (120499602646584) ao lado do titulo e no botao flutuante (fundo preto,
+	    circular, icone + contorno sincronizados com a AccentColor).
+	  - Textura de luas (129483005856072) caindo em loop atras dos componentes,
+	    discretas e na cor da AccentColor (desligada no modo baixo desempenho).
+
 	v2.3.0:
 	  - ColorPicker: sem faixas RGB; seletor circular + tonalidades ao lado,
 	    tons, presets e campo HEX. Interacao corrigida (mouse e toque).
@@ -75,6 +81,11 @@ local DefaultSwatches = {
 	Color3.fromRGB(34, 211, 238), Color3.fromRGB(52, 211, 153),
 	Color3.fromRGB(245, 176, 65), Color3.fromRGB(249, 115, 22),
 	Color3.fromRGB(239, 68, 68), Color3.fromRGB(236, 72, 153),
+}
+
+local Assets = {
+	Logo = "rbxassetid://120499602646584",
+	Moon = "rbxassetid://129483005856072",
 }
 
 local function accent() return State.Accent end
@@ -2444,8 +2455,11 @@ function Window:_applyLayout(animate)
 	self._closeButton.Position = UDim2.new(1, -8, 0.5, 0)
 	self._closeIcon:SetSize(m.Icon - 2)
 	local titleX = 6 + tb + 8
-	self._titleLabel.Position = UDim2.fromOffset(titleX, 0)
-	self._titleLabel.Size = UDim2.new(1, -(titleX + buttonsWidth), 1, 0)
+	self._titleBadge.Position = UDim2.new(0, titleX, 0.5, 0)
+	self._titleBadge.Size = UDim2.fromOffset(tb, tb)
+	local labelX = titleX + tb + 6
+	self._titleLabel.Position = UDim2.fromOffset(labelX, 0)
+	self._titleLabel.Size = UDim2.new(1, -(labelX + buttonsWidth), 1, 0)
 	self._titleLabel.TextSize = m.Text + 1
 	self._body.Position = UDim2.fromOffset(0, m.Title)
 	self._body.Size = UDim2.new(1, 0, 1, -m.Title)
@@ -2472,7 +2486,6 @@ function Window:_applyLayout(animate)
 	self._pages.Position = UDim2.fromOffset(0, m.Header + 12)
 	self._pages.Size = UDim2.new(1, 0, 1, -(m.Header + 12))
 	self._ball.Size = UDim2.fromOffset(m.Ball, m.Ball)
-	self._ball.TextSize = math.floor(m.Ball * 0.45)
 	self._ball.Position = clampBallPosition(self._ball.Position, m.Ball)
 
 	self:_layoutSidebar()
@@ -2511,6 +2524,7 @@ end
 function Window:_applyPerformance()
 	local lowPerformance = State.LowPerformance
 	if self._shadow then self._shadow.Sync() end
+	if self._moonLayer then self._moonLayer.Visible = not lowPerformance end
 	for _, gradient in ipairs(self._gradients) do
 		pcall(function() gradient.Enabled = not lowPerformance end)
 	end
@@ -3359,6 +3373,49 @@ function AetherUI.CreateWindow(config)
 	addCorner(borderInner, 12)
 	local innerStroke = addStroke(borderInner, Theme.White, 0.965, 1)
 
+	-- Textura de luas caindo em loop (ZIndex 0: atras de todos os componentes).
+	local moonLayer = create("Frame", {
+		Name = "MoonLayer", BackgroundTransparency = 1, ClipsDescendants = true,
+		Size = UDim2.fromScale(1, 1), ZIndex = 0, Active = false, Parent = root,
+	})
+	self._moonLayer = moonLayer
+	local moons = {}
+	local moonCount = 16
+	local moonRng = Random.new(1307)
+	for i = 1, moonCount do
+		local size = moonRng:NextInteger(12, 26)
+		local image = create("ImageLabel", {
+			Name = "Moon", AnchorPoint = Vector2.new(0.5, 0), BackgroundTransparency = 1,
+			Size = UDim2.fromOffset(size, size), Image = Assets.Moon,
+			ImageColor3 = accent(), ImageTransparency = 1, ZIndex = 0,
+			Rotation = moonRng:NextInteger(-25, 25), Parent = moonLayer,
+		})
+		table.insert(moons, {
+			Image = image, Size = size,
+			X = math.clamp((i - 0.5) / moonCount + moonRng:NextNumber(-0.025, 0.025), 0.02, 0.98),
+			Speed = moonRng:NextNumber(0.03, 0.075),
+			Phase = (i * 0.618034) % 1,
+			Sway = moonRng:NextNumber(0.004, 0.012),
+			SwayRate = moonRng:NextNumber(0.4, 1),
+			Base = moonRng:NextNumber(0.86, 0.92),
+		})
+	end
+	self._moons = moons
+	local moonTime = 0
+	table.insert(self._connections, RunService.Heartbeat:Connect(function(dt)
+		if State.LowPerformance or not gui.Enabled or not root.Visible then return end
+		moonTime += dt
+		for _, moon in ipairs(moons) do
+			local y = (moon.Phase + moonTime * moon.Speed) % 1
+			local fade = math.clamp(math.min(y, 1 - y) * 7, 0, 1)
+			moon.Image.Position = UDim2.new(
+				moon.X + math.sin(moonTime * moon.SwayRate + moon.Phase * 6.28) * moon.Sway, 0,
+				y, -moon.Size * (1 - y)
+			)
+			moon.Image.ImageTransparency = 1 - (1 - moon.Base) * fade
+		end
+	end))
+
 	local titleBar = create("Frame", {
 		Name = "TitleBar", Size = UDim2.new(1, 0, 0, m.Title),
 		BackgroundColor3 = Theme.Sidebar, Parent = root,
@@ -3376,6 +3433,24 @@ function AetherUI.CreateWindow(config)
 		TextTruncate = Enum.TextTruncate.AtEnd, Active = true, Parent = titleBar,
 	})
 	self._titleLabel = titleLabel
+
+	-- Icone circular (fundo preto) ao lado do titulo; contorno/icone seguem a AccentColor.
+	local titleBadge = create("Frame", {
+		Name = "LogoBadge", AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 6 + m.TitleButton + 8, 0.5, 0),
+		Size = UDim2.fromOffset(m.TitleButton, m.TitleButton),
+		BackgroundColor3 = Theme.Black, Parent = titleBar,
+	})
+	addCornerScale(titleBadge, 0.5)
+	local titleBadgeStroke = addStroke(titleBadge, accentLight(), 0.35, 1.5)
+	local titleBadgeIcon = create("ImageLabel", {
+		Name = "Logo", AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(0.62, 0.62), BackgroundTransparency = 1,
+		Image = Assets.Logo, ImageColor3 = accentLight(),
+		ScaleType = Enum.ScaleType.Fit, Parent = titleBadge,
+	})
+	self._titleBadge = titleBadge
 	create("Frame", {
 		Name = "Divider", AnchorPoint = Vector2.new(0, 1),
 		Position = UDim2.new(0, 0, 1, 0),
@@ -3626,12 +3701,17 @@ function AetherUI.CreateWindow(config)
 		Name = "Ball", AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = clampBallPosition(UDim2.fromOffset(44, math.floor(viewport.Y * 0.3)), m.Ball),
 		Size = UDim2.fromOffset(m.Ball, m.Ball),
-		BackgroundColor3 = Theme.BackgroundDeep, AutoButtonColor = false,
-		Text = "A", Font = Theme.FontBlack,
-		TextSize = math.floor(m.Ball * 0.45), TextColor3 = accentLight(),
-		Visible = false, Parent = gui,
+		BackgroundColor3 = Theme.Black, AutoButtonColor = false,
+		Text = "", Visible = false, Parent = gui,
 	})
 	addCornerScale(ball, 0.5)
+	local ballIcon = create("ImageLabel", {
+		Name = "Logo", AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(0.62, 0.62), BackgroundTransparency = 1,
+		Image = Assets.Logo, ImageColor3 = accentLight(),
+		ScaleType = Enum.ScaleType.Fit, Active = false, Parent = ball,
+	})
 	self._ballStroke = create("UIStroke", {
 		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 		Color = accentLight(), Transparency = 0.7, Thickness = 2, Parent = ball,
@@ -3663,8 +3743,11 @@ function AetherUI.CreateWindow(config)
 		setProps(self._indicator, { BackgroundColor3 = accent() }, animate, Anim.Normal)
 		if self._indicatorGlow then setProps(self._indicatorGlow, { BackgroundColor3 = accent() }, animate, Anim.Normal) end
 		accentLine.BackgroundColor3 = accent()
-		ball.TextColor3 = accentLight()
+		ballIcon.ImageColor3 = accentLight()
 		self._ballStroke.Color = accentLight()
+		titleBadgeIcon.ImageColor3 = accentLight()
+		titleBadgeStroke.Color = accentLight()
+		for _, moon in ipairs(self._moons) do moon.Image.ImageColor3 = accent() end
 		setProps(innerStroke, { Color = Theme.White }, animate, Anim.Normal)
 		setProps(searchStroke, { Color = (searchBox.Text ~= "" or self._searchFocused) and accent() or Theme.StrokeSoft }, animate, Anim.Normal)
 		self._searchScroll.ScrollBarImageColor3 = accent()
