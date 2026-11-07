@@ -5,6 +5,19 @@
 	        Section e Label, componentes, janela, busca global.
 	Cole TODO este arquivo em um unico ModuleScript.
 
+	v2.4.0:
+	  - Botao de estrela ao lado de minimizar: mostra/oculta estrelas em abas,
+		secoes e componentes para favoritar/desfavoritar individualmente
+		(ocultar NAO apaga os favoritos).
+	  - Aba exclusiva "Favoritos" para acessar os itens salvos.
+	  - Abas: selecionada levemente maior (escala + cor suaves) e indicador
+		deslizante com leve alongamento.
+	  - Microanimacoes: botoes, toggles, sliders, dropdowns, notificacoes, modal.
+	  - Nova API (opcional): Window:SetFavoritesVisible/GetFavoritesVisible/
+		ToggleFavoritesMode/GetFavorites/SetFavorites/ClearFavorites/IsFavorite
+		e config: Favorites, ShowFavoriteStars, OnFavoritesChanged,
+		FavoritesTab, FavoriteButton.
+
 	v2.3.1:
 	  - Icone (120499602646584) ao lado do titulo e no botao flutuante (fundo preto,
 	    circular, icone + contorno sincronizados com a AccentColor).
@@ -28,7 +41,7 @@ local RunService = game:GetService("RunService")
 local GuiService = game:GetService("GuiService")
 
 local AetherUI = {}
-AetherUI.Version = "2.3.0"
+AetherUI.Version = "2.4.0"
 
 local Window = {}
 Window.__index = Window
@@ -87,6 +100,8 @@ local Assets = {
 	Logo = "rbxassetid://120499602646584",
 	Moon = "rbxassetid://129483005856072",
 }
+
+local STAR_GUTTER = 30 -- faixa lateral reservada para as estrelas dos componentes
 
 local function accent() return State.Accent end
 local function accentDeep() return State.Accent:Lerp(Theme.Black, 0.35) end
@@ -418,6 +433,20 @@ local function buildStar()
 	return shapePoly(points, true)
 end
 
+local function buildStarFilled()
+	local shapes = {}
+	for _, k in ipairs({ 1, 0.8, 0.6, 0.4, 0.2 }) do
+		local points = {}
+		for i = 0, 9 do
+			local radius = ((i % 2 == 0) and 6.8 or 3) * k
+			local angle = -math.pi / 2 + i * math.pi / 5
+			table.insert(points, { 8 + radius * math.cos(angle), 8.4 + radius * math.sin(angle) })
+		end
+		for _, shape in ipairs(shapePoly(points, true)) do table.insert(shapes, shape) end
+	end
+	return shapes
+end
+
 local IconShapes = {
 	home = mergeShapes({
 		shapeLine(2, 8, 8, 2.5), shapeLine(8, 2.5, 14, 8),
@@ -454,6 +483,7 @@ local IconShapes = {
 		{ shapeLine(8, 6.2, 8, 9.6), shapeDot(8, 11.7, 1.7) }
 	),
 	star = buildStar(),
+	star_fill = buildStarFilled(),
 	gauge = { shapeBox(2, 2, 12, 12, 6), shapeLine(8, 8, 11, 5), shapeDot(8, 8, 2.6) },
 	palette = {
 		shapeBox(2, 2, 12, 12, 6), shapeDot(5.5, 6.2, 2.2), shapeDot(8.5, 4.8, 2.2),
@@ -616,6 +646,121 @@ local function spawnRipple(parent, position, color, sizeLimit)
 	t.Completed:Connect(function() ripple:Destroy() end)
 end
 
+local function starSize() return isMobile() and 24 or 20 end
+
+-- "Pop" suave quando o texto de um rotulo de valor muda (slider/dropdown).
+local function attachValuePop(label, strength, throttle)
+	local scale = create("UIScale", { Parent = label })
+	local last = 0
+	label:GetPropertyChangedSignal("Text"):Connect(function()
+		if State.LowPerformance then return end
+		local now = os.clock()
+		if now - last < (throttle or 0) then return end
+		last = now
+		scale.Scale = strength or 1.1
+		tween(scale, Anim.Normal, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+	end)
+end
+
+-- Estrela de favorito: contorno + preenchimento animado (pop/rotacao).
+-- Show(visivel, animar) aparece/some com fade + escala; Set(favorito, animar).
+local function createStarWidget(parent, size, onActivated)
+	local widget = { Shown = false, NoAutoShow = false }
+	local fav, hover = false, false
+	local root = create("CanvasGroup", {
+		Name = "Star", AnchorPoint = Vector2.new(0.5, 0.5),
+		Size = UDim2.fromOffset(size, size), BackgroundTransparency = 1,
+		GroupTransparency = 1, Visible = false, ZIndex = 6, Parent = parent,
+	})
+	local rootScale = create("UIScale", { Scale = 0.6, Parent = root })
+	local iconSize = math.floor(size * 0.74)
+	local outline = createIcon("star", root, iconSize, Theme.Muted)
+	outline.Instance.AnchorPoint = Vector2.new(0.5, 0.5)
+	outline.Instance.Position = UDim2.fromScale(0.5, 0.5)
+	local fillWrap = create("Frame", {
+		Name = "Fill", AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(iconSize, iconSize), BackgroundTransparency = 1, Parent = root,
+	})
+	local fillScale = create("UIScale", { Scale = 0, Parent = fillWrap })
+	local fill = createIcon("star_fill", fillWrap, iconSize, accentLight())
+	fill.Instance.AnchorPoint = Vector2.new(0.5, 0.5)
+	fill.Instance.Position = UDim2.fromScale(0.5, 0.5)
+	local hit = create("TextButton", {
+		Name = "Hit", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1),
+		Text = "", AutoButtonColor = false, ZIndex = 4, Parent = root,
+	})
+	widget.Root = root
+
+	local function outlineColor()
+		if fav then return accentLight() end
+		return hover and accentLight() or Theme.Muted
+	end
+	local function restScale() return hover and 1.12 or 1 end
+
+	function widget.Set(value, animate)
+		value = value == true
+		if value == fav then return end
+		fav = value
+		if animate then outline:Tween(outlineColor(), Anim.Fast) else outline:SetColor(outlineColor()) end
+		if fav then
+			if animate then
+				fillWrap.Rotation = -40
+				tween(fillScale, Anim.Spring + 0.1, { Scale = 1 }, Enum.EasingStyle.Back)
+				tween(fillWrap, Anim.Spring + 0.1, { Rotation = 0 }, Enum.EasingStyle.Back)
+			else
+				fillScale.Scale = 1; fillWrap.Rotation = 0
+			end
+		else
+			if animate then tween(fillScale, Anim.Fast, { Scale = 0 }) else fillScale.Scale = 0 end
+		end
+	end
+	function widget.Refresh()
+		outline:SetColor(outlineColor())
+		fill:SetColor(accentLight())
+	end
+	function widget.Show(visible, animate)
+		visible = visible == true
+		widget.Shown = visible
+		if visible then
+			root.Visible = true
+			if animate then
+				tween(root, Anim.Normal, { GroupTransparency = 0 })
+				tween(rootScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
+			else
+				root.GroupTransparency = 0; rootScale.Scale = 1
+			end
+		else
+			if animate then
+				local t = tween(root, Anim.Fast, { GroupTransparency = 1 })
+				tween(rootScale, Anim.Fast, { Scale = 0.6 })
+				t.Completed:Connect(function()
+					if not widget.Shown then root.Visible = false end
+				end)
+			else
+				root.GroupTransparency = 1; rootScale.Scale = 0.6; root.Visible = false
+			end
+		end
+	end
+
+	hit.MouseEnter:Connect(function()
+		hover = true
+		if not fav then outline:Tween(outlineColor(), Anim.Fast) end
+		tween(rootScale, Anim.Fast, { Scale = restScale() })
+	end)
+	hit.MouseLeave:Connect(function()
+		hover = false
+		if not fav then outline:Tween(outlineColor(), Anim.Fast) end
+		tween(rootScale, Anim.Fast, { Scale = restScale() })
+	end)
+	hit.MouseButton1Down:Connect(function() tween(rootScale, Anim.Micro, { Scale = 0.8 }) end)
+	hit.MouseButton1Up:Connect(function()
+		tween(rootScale, Anim.Spring, { Scale = restScale() }, Enum.EasingStyle.Back)
+	end)
+	hit.Activated:Connect(function() safeCall(onActivated) end)
+	return widget
+end
+
 ----------------------------------------------------------------
 -- Notificacoes (DisplayOrder 990 -> sempre abaixo da UI Library)
 ----------------------------------------------------------------
@@ -744,6 +889,14 @@ function AetherUI.Notify(first, second)
 		if icon then
 			icon.Instance.AnchorPoint = Vector2.new(0.5, 0.5)
 			icon.Instance.Position = UDim2.fromScale(0.5, 0.5)
+			if not State.LowPerformance then
+				local badgeScale = create("UIScale", { Scale = 0, Parent = badge })
+				task.delay(0.12, function()
+					if badge.Parent then
+						tween(badgeScale, Anim.Spring + 0.1, { Scale = 1 }, Enum.EasingStyle.Back)
+					end
+				end)
+			end
 		else badge:Destroy() end
 	end
 
@@ -813,8 +966,16 @@ function AetherUI.Notify(first, second)
 	overlay.Activated:Connect(function()
 		safeCall(config.Callback); dismiss()
 	end)
+	if closeIcon then
+		overlay.MouseEnter:Connect(function() closeIcon:Tween(Theme.Text, Anim.Fast) end)
+		overlay.MouseLeave:Connect(function() closeIcon:Tween(Theme.Muted, Anim.Fast) end)
+	end
 	tween(slot, Anim.Normal, { Size = UDim2.new(1, 0, 0, height) })
 	tween(card, Anim.Slow, { Position = UDim2.fromOffset(0, 0), GroupTransparency = 0 })
+	if not State.LowPerformance then
+		bar.Size = UDim2.new(0, 2, 0, 0)
+		tween(bar, Anim.Slow, { Size = UDim2.new(0, 2, 1, 0) })
+	end
 	if progress then
 		tween(progress, duration, { Size = UDim2.new(0, 0, 0, 2) }, Enum.EasingStyle.Linear)
 	end
@@ -845,6 +1006,8 @@ function Tab:_register(kind, instance, getName, extra)
 		for key, value in pairs(extra) do entry[key] = value end
 	end
 	table.insert(self._entries, entry)
+	entry.FavKey = self._window:_makeFavKey(self, kind, tostring(getName()))
+	self._window:_attachEntryStar(self, entry)
 	instance.Destroying:Connect(function()
 		local index = table.find(self._entries, entry)
 		if index then table.remove(self._entries, index) end
@@ -1051,12 +1214,14 @@ function Tab:AddButton(config)
 		chevron:Tween(accentLight(), Anim.Fast)
 		if lead then lead:Tween(accentLight(), Anim.Fast) end
 		tween(scale, Anim.Fast, { Scale = 1.005 })
+		tween(chevron.Instance, Anim.Fast, { Position = UDim2.new(1, (m.Icon - 2) + 12, 0.5, 0) })
 	end)
 	button.MouseLeave:Connect(function()
 		hovering = false
 		tween(button, Anim.Fast, { BackgroundColor3 = Theme.Element })
 		tween(stroke, Anim.Fast, { Color = Theme.StrokeSoft, Transparency = 0.35 })
 		tween(scale, Anim.Fast, { Scale = 1 })
+		tween(chevron.Instance, Anim.Fast, { Position = UDim2.new(1, (m.Icon - 2) + 8, 0.5, 0) })
 		chevron:Tween(Theme.Muted, Anim.Fast)
 		if lead then lead:Tween(Theme.SubText, Anim.Fast) end
 	end)
@@ -1068,7 +1233,15 @@ function Tab:AddButton(config)
 		tween(button, Anim.Fast, { BackgroundColor3 = hovering and Theme.ElementHover or Theme.Element })
 		tween(scale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
 	end)
-	button.Activated:Connect(function() safeCall(config.Callback) end)
+	button.Activated:Connect(function()
+		local flash = tween(stroke, Anim.Micro, { Color = accentLight(), Transparency = 0.05 })
+		flash.Completed:Connect(function()
+			tween(stroke, Anim.Normal, hovering
+				and { Color = accent(), Transparency = 0.55 }
+				or { Color = Theme.StrokeSoft, Transparency = 0.35 })
+		end)
+		safeCall(config.Callback)
+	end)
 	button.InputBegan:Connect(function(input)
 		if not isPointer(input) then return end
 		local rel = pointerPosition(input) - button.AbsolutePosition
@@ -1250,8 +1423,21 @@ function Tab:AddToggle(config)
 		tween(row, Anim.Fast, { BackgroundColor3 = Theme.Element })
 		tween(rowScale, Anim.Fast, { Scale = 1 })
 	end)
-	row.MouseButton1Down:Connect(function() tween(rowScale, Anim.Micro, { Scale = 0.99 }) end)
-	row.MouseButton1Up:Connect(function() tween(rowScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back) end)
+	local function knobRest()
+		local ks = m.SwitchH - 8
+		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(ks, ks) })
+	end
+	row.MouseButton1Down:Connect(function()
+		tween(rowScale, Anim.Micro, { Scale = 0.99 })
+		local ks = m.SwitchH - 8
+		tween(knob, Anim.Micro, { Size = UDim2.fromOffset(ks + 4, ks) })
+	end)
+	row.MouseButton1Up:Connect(function()
+		tween(rowScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
+		local ks = m.SwitchH - 8
+		tween(knob, Anim.Spring, { Size = UDim2.fromOffset(ks, ks) }, Enum.EasingStyle.Back)
+	end)
+	row.MouseLeave:Connect(knobRest)
 	row.Activated:Connect(function() object:Set(not state) end)
 	return object
 end
@@ -1302,6 +1488,7 @@ function Tab:AddSlider(config)
 		Font = Theme.FontBold, TextSize = m.Text - 1,
 		TextColor3 = Theme.SubText, TextXAlignment = Enum.TextXAlignment.Right, Parent = holder,
 	})
+	attachValuePop(valueLabel, 1.1, 0.12)
 	local track = create("Frame", {
 		Name = "Track", AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.new(0.5, 0, 1, -16), Size = UDim2.new(1, -28, 0, 5),
@@ -1480,6 +1667,7 @@ local function buildDropdownShell(tab, config, className)
 	local chevron = createIcon("chevron-down", header, m.Icon - 2, Theme.Muted)
 	chevron.Instance.AnchorPoint = Vector2.new(1, 0.5)
 	chevron.Instance.Position = UDim2.new(1, -14, 0.5, 0)
+	attachValuePop(valueLabel, 1.08, 0)
 
 	local panel = create("Frame", {
 		Name = "Panel", Visible = false,
@@ -1514,10 +1702,31 @@ local function buildDropdownShell(tab, config, className)
 		return math.min(content, 220), content, rowH
 	end
 
+	local headerHover = false
+	local function paintHeader(animate)
+		local active = shell.Expanded or headerHover
+		local props = {
+			Color = active and accent() or Theme.StrokeSoft,
+			Transparency = active and 0.55 or 0.35,
+		}
+		if animate then
+			tween(rootStroke, Anim.Fast, props)
+			tween(root, Anim.Fast, { BackgroundColor3 = headerHover and Theme.ElementHover or Theme.Element })
+			chevron:Tween(active and accentLight() or Theme.Muted, Anim.Fast)
+		else
+			rootStroke.Color = props.Color; rootStroke.Transparency = props.Transparency
+			root.BackgroundColor3 = headerHover and Theme.ElementHover or Theme.Element
+			chevron:SetColor(active and accentLight() or Theme.Muted)
+		end
+	end
+	header.MouseEnter:Connect(function() headerHover = true; paintHeader(true) end)
+	header.MouseLeave:Connect(function() headerHover = false; paintHeader(true) end)
+
 	function shell.setExpanded(value, animate, noScroll)
 		value = value == true
 		if shell.Expanded == value then return end
 		shell.Expanded = value
+		paintHeader(animate)
 		local panelH, content = heights()
 		scroll.ScrollingEnabled = content > panelH
 		if value then
@@ -2306,17 +2515,51 @@ function Tab:_applyMetrics()
 	local m = self._metrics
 	self._label.TextSize = m.Text
 	self._label.Position = UDim2.fromOffset(m.SideRow, 0)
-	self._label.Size = UDim2.new(1, -m.SideRow, 1, 0)
+	self:_applyLabelWidth(false)
 	if self._icon then
 		self._icon:SetSize(m.Icon)
 		self._icon.Instance.Position = UDim2.new(0, math.floor((m.SideRow - m.Icon) / 2), 0.5, 0)
 	end
 	self._pagePadding.PaddingLeft = UDim.new(0, m.Pad)
 	self._pagePadding.PaddingTop = UDim.new(0, m.Pad)
-	self._pagePadding.PaddingRight = UDim.new(0, m.Pad)
+	self:_applyStarGutter(false)
 	self._pagePadding.PaddingBottom = UDim.new(0, m.Pad)
 	self._pageLayout.Padding = UDim.new(0, m.Gap)
 	self:_refresh()
+end
+
+-- Escala de repouso: aba selecionada fica ligeiramente maior.
+function Tab:_restScale()
+	if self._window._selectedTab == self then return 1.035 end
+	if self._hover then return 1.01 end
+	return 1
+end
+
+-- Reserva espaco para a estrela da aba (sidebar expandida + modo estrelas).
+function Tab:_applyLabelWidth(animate)
+	local m = self._metrics
+	local extra = 0
+	if self._window._starsOn and not self._collapsed and self._starWidget then
+		extra = starSize() + 10
+	end
+	local size = UDim2.new(1, -(m.SideRow + extra), 1, 0)
+	if animate then tween(self._label, Anim.Smooth, { Size = size })
+	else self._label.Size = size end
+end
+
+-- Faixa lateral da pagina para as estrelas dos componentes.
+function Tab:_applyStarGutter(animate)
+	local m = self._metrics
+	local extra = (self._window._starsOn and not self._isFavorites) and STAR_GUTTER or 0
+	local target = UDim.new(0, m.Pad + extra)
+	if animate then tween(self._pagePadding, Anim.Smooth, { PaddingRight = target })
+	else self._pagePadding.PaddingRight = target end
+end
+
+function Tab:_updateTabStar(animate)
+	local widget = self._starWidget
+	if not widget then return end
+	widget.Show(self._window._starsOn == true and not self._collapsed, animate)
 end
 
 function Tab:_paint(animate)
@@ -2327,18 +2570,24 @@ function Tab:_paint(animate)
 	local backgroundTransparency = hovering and 0.5 or 1
 	if animate then
 		tween(self._button, Anim.Fast, { BackgroundTransparency = backgroundTransparency })
-		tween(self._label, Anim.Fast, { TextColor3 = textColor })
-		if self._icon then self._icon:Tween(iconColor, Anim.Fast) end
+		tween(self._label, Anim.Normal, { TextColor3 = textColor })
+		if self._icon then self._icon:Tween(iconColor, Anim.Normal) end
+		if self._scaleObj and not self._pressed then
+			tween(self._scaleObj, Anim.Smooth, { Scale = self:_restScale() })
+		end
 	else
 		self._button.BackgroundTransparency = backgroundTransparency
 		self._label.TextColor3 = textColor
 		if self._icon then self._icon:SetColor(iconColor) end
+		if self._scaleObj then self._scaleObj.Scale = self:_restScale() end
 	end
 end
 
 function Tab:_applyCollapse(collapsed, animate)
 	local label = self._label
 	self._collapsed = collapsed
+	self:_updateTabStar(animate)
+	self:_applyLabelWidth(animate)
 	if collapsed then
 		if animate then
 			local t = tween(label, Anim.Fast, { TextTransparency = 1 })
@@ -2379,8 +2628,9 @@ end
 function Window:_ordered()
 	local list = {}
 	for _, tab in ipairs(self._tabs) do
-		if not tab._isSettings then table.insert(list, tab) end
+		if not tab._isSettings and not tab._isFavorites then table.insert(list, tab) end
 	end
+	if self._favoritesTab then table.insert(list, self._favoritesTab) end
 	if self._settingsTab then table.insert(list, self._settingsTab) end
 	return list
 end
@@ -2388,8 +2638,10 @@ end
 function Window:_layoutSidebar()
 	local m = self._metrics
 	local y = 0
+	local separated = false
 	for _, tab in ipairs(self:_ordered()) do
-		if tab._isSettings then
+		if (tab._isSettings or tab._isFavorites) and not separated then
+			separated = true
 			y = y + 4
 			self._separator.Position = UDim2.new(0, 4, 0, y)
 			self._separator.Size = UDim2.new(1, -8, 0, 1)
@@ -2400,7 +2652,7 @@ function Window:_layoutSidebar()
 		tab._button.Size = UDim2.new(1, 0, 0, m.SideRow)
 		y = y + m.SideRow + m.SideGap
 	end
-	self._separator.Visible = self._settingsTab ~= nil
+	self._separator.Visible = self._settingsTab ~= nil or self._favoritesTab ~= nil
 	self._list.CanvasSize = UDim2.fromOffset(0, y + 4)
 end
 
@@ -2424,9 +2676,24 @@ function Window:_moveIndicator(animate)
 	self._indicator.Visible = true
 	if self._indicatorGlow then self._indicatorGlow.Visible = true end
 	if animate and not firstShow then
+		local dist = math.abs(indicatorProps.Position.Y.Offset - self._indicator.Position.Y.Offset)
 		tween(self._highlight, Anim.Smooth, highlightProps)
-		tween(self._indicator, Anim.Spring, indicatorProps, Enum.EasingStyle.Back)
-		if self._indicatorGlow then tween(self._indicatorGlow, Anim.Spring, glowProps, Enum.EasingStyle.Back) end
+		tween(self._indicator, Anim.Smooth, { Position = indicatorProps.Position })
+		if self._indicatorGlow then
+			tween(self._indicatorGlow, Anim.Smooth, { Position = glowProps.Position, Size = glowProps.Size })
+		end
+		-- Leve alongamento do indicador durante o deslize.
+		local stretch = math.min(dist * 0.3, 14)
+		if stretch > 1 and not State.LowPerformance then
+			local grow = tween(self._indicator, Anim.Fast, { Size = UDim2.fromOffset(3, indicatorHeight + stretch) })
+			grow.Completed:Connect(function(playbackState)
+				if playbackState == Enum.PlaybackState.Completed then
+					tween(self._indicator, Anim.Normal, { Size = indicatorProps.Size })
+				end
+			end)
+		else
+			tween(self._indicator, Anim.Fast, { Size = indicatorProps.Size })
+		end
 	else
 		for k, v in pairs(highlightProps) do self._highlight[k] = v end
 		for k, v in pairs(indicatorProps) do self._indicator[k] = v end
@@ -2444,13 +2711,16 @@ function Window:_applyLayout(animate)
 
 	self._titleBar.Size = UDim2.new(1, 0, 0, m.Title)
 	local tb = m.TitleButton
-	local buttonsWidth = 8 + tb * 2 + 6 + 8
+	local buttonsWidth = 8 + tb * 3 + 12 + 8
 	self._menuButton.Size = UDim2.fromOffset(tb, tb)
 	self._menuButton.Position = UDim2.new(0, 6, 0.5, 0)
 	self._menuIcon:SetSize(m.Icon - 2)
 	self._minimizeButton.Size = UDim2.fromOffset(tb, tb)
 	self._minimizeButton.Position = UDim2.new(1, -(8 + tb + 6), 0.5, 0)
 	self._minimizeIcon:SetSize(m.Icon - 2)
+	self._starButton.Size = UDim2.fromOffset(tb, tb)
+	self._starButton.Position = UDim2.new(1, -(8 + (tb + 6) * 2), 0.5, 0)
+	self._starIcon:SetSize(m.Icon - 2)
 	self._closeButton.Size = UDim2.fromOffset(tb, tb)
 	self._closeButton.Position = UDim2.new(1, -8, 0.5, 0)
 	self._closeIcon:SetSize(m.Icon - 2)
@@ -2589,6 +2859,7 @@ function Window:_selectTab(tab, animate)
 		self._header.TextTransparency = 0
 	end
 	local holder = tab._holder
+	if tab._isFavorites then self:_rebuildFavorites(animate) end
 	holder.Visible = true
 	tab:_refresh()
 	if animate then
@@ -2602,6 +2873,7 @@ function Window:_selectTab(tab, animate)
 		holder.GroupTransparency = 0
 	end
 	self:_moveIndicator(animate)
+	self:_syncStars()
 	self:_clearSearch()
 end
 
@@ -2883,7 +3155,355 @@ end
 ----------------------------------------------------------------
 -- Tab lateral (com hover + bounce)
 ----------------------------------------------------------------
-function Window:_createTab(label, iconSpec, isSettings)
+----------------------------------------------------------------
+-- Favoritos (v2.4.0)
+-- Chaves estaveis por item: "T::aba", "S::aba::Section::nome#n",
+-- "C::aba::Tipo::nome#n". Ocultar as estrelas nao apaga a selecao.
+----------------------------------------------------------------
+local KindIcons = {
+	Tab = "grid", Section = "list", Label = "info", Button = "target",
+	Toggle = "check", Slider = "gauge", Dropdown = "dropdown",
+	MultiDropdown = "list", ColorPicker = "palette",
+}
+
+function Window:_makeFavKey(tab, kind, name)
+	tab._keyCounts = tab._keyCounts or {}
+	local base = (kind == "Section" and "S::" or "C::") .. tab._name .. "::" .. kind .. "::" .. name
+	local n = (tab._keyCounts[base] or 0) + 1
+	tab._keyCounts[base] = n
+	return base .. "#" .. n
+end
+
+function Window:_newStar(parent, size, key, onToggle)
+	local widget
+	widget = createStarWidget(parent, size, function()
+		if onToggle then onToggle(widget)
+		else self:_setFavorite(key, self._favorites[key] ~= true) end
+	end)
+	widget.Key = key
+	local list = self._favWidgets[key]
+	if not list then list = {}; self._favWidgets[key] = list end
+	table.insert(list, widget)
+	widget.Root.Destroying:Connect(function()
+		local index = table.find(list, widget)
+		if index then table.remove(list, index) end
+	end)
+	widget.Set(self._favorites[key] == true, false)
+	widget.Show(self._starsOn == true, false)
+	return widget
+end
+
+-- Estrela de um componente/secao: fica numa camada acima da pagina (faixa lateral)
+-- e e reposicionada junto com o item (rolagem, expansao, redimensionamento).
+function Window:_attachEntryStar(tab, entry)
+	if tab._isFavorites or not tab._starLayer then return end
+	local widget = self:_newStar(tab._starLayer, starSize(), entry.FavKey)
+	entry.StarWidget = widget
+	local item = { Widget = widget, Instance = entry.Instance }
+	table.insert(tab._starItems, item)
+	entry.Instance.Destroying:Connect(function()
+		local index = table.find(tab._starItems, item)
+		if index then table.remove(tab._starItems, index) end
+		widget.Root:Destroy()
+	end)
+end
+
+function Window:_syncStars()
+	local tab = self._selectedTab
+	if not tab or not tab._starLayer or self._state == "Destroyed" then return end
+	if not self._root.Visible then return end
+	local layer = tab._starLayer
+	local scale = self._scale and self._scale.Scale or 1
+	if scale <= 0 then scale = 1 end
+	local m = self._metrics
+	local origin = layer.AbsolutePosition
+	local x = math.floor(layer.AbsoluteSize.X / scale - m.Pad - STAR_GUTTER / 2 + 0.5)
+	for _, item in ipairs(tab._starItems) do
+		local instance = item.Instance
+		local root = item.Widget.Root
+		if instance.Parent then
+			if item.Widget.Shown then root.Visible = instance.Visible end
+			if instance.Visible then
+				local h = instance.AbsoluteSize.Y / scale
+				local y = math.floor((instance.AbsolutePosition.Y - origin.Y) / scale + math.min(h, m.Row) / 2 + 0.5)
+				if item.X ~= x or item.Y ~= y then
+					item.X, item.Y = x, y
+					root.Position = UDim2.fromOffset(x, y)
+				end
+			end
+		end
+	end
+end
+
+function Window:GetFavorites()
+	local list = {}
+	for _, key in ipairs(self._favOrder) do
+		if self._favorites[key] then table.insert(list, key) end
+	end
+	return list
+end
+
+function Window:IsFavorite(key) return self._favorites[key] == true end
+
+function Window:_setFavorite(key, value, noRebuild)
+	value = value == true
+	if (self._favorites[key] == true) == value then return end
+	if value then
+		self._favorites[key] = true
+		table.insert(self._favOrder, key)
+	else
+		self._favorites[key] = nil
+		local index = table.find(self._favOrder, key)
+		if index then table.remove(self._favOrder, index) end
+	end
+	for _, widget in ipairs(self._favWidgets[key] or {}) do widget.Set(value, true) end
+	if not noRebuild then self:_rebuildFavorites(false) end
+	safeCall(self._onFavChanged, self:GetFavorites())
+end
+
+function Window:SetFavorites(list)
+	local fresh, order = {}, {}
+	for _, key in ipairs(typeof(list) == "table" and list or {}) do
+		if typeof(key) == "string" and not fresh[key] then
+			fresh[key] = true; table.insert(order, key)
+		end
+	end
+	self._favorites = fresh
+	self._favOrder = order
+	for key, widgets in pairs(self._favWidgets) do
+		for _, widget in ipairs(widgets) do widget.Set(fresh[key] == true, true) end
+	end
+	self:_rebuildFavorites(false)
+	safeCall(self._onFavChanged, self:GetFavorites())
+end
+
+function Window:ClearFavorites() self:SetFavorites({}) end
+
+function Window:SetFavoritesVisible(value)
+	value = value == true
+	if self._starsOn == value then return end
+	self._starsOn = value
+	self:_applyStarsMode(true)
+end
+function Window:GetFavoritesVisible() return self._starsOn == true end
+function Window:ToggleFavoritesMode() self:SetFavoritesVisible(not (self._starsOn == true)) end
+function Window:GetFavoritesTab() return self._favoritesTab end
+
+function Window:_applyStarsMode(animate)
+	local on = self._starsOn == true
+	setProps(self._starActive, { BackgroundTransparency = on and 0.35 or 1 }, animate, Anim.Normal)
+	setProps(self._starActiveStroke, { Transparency = on and 0.5 or 1 }, animate, Anim.Normal)
+	if animate then
+		self._starIcon:Tween(on and accentLight() or Theme.SubText, Anim.Normal)
+		local icon = self._starIcon.Instance
+		icon.Rotation = 0
+		local spin = tween(icon, Anim.Slow, { Rotation = 72 }, Enum.EasingStyle.Back)
+		spin.Completed:Connect(function() icon.Rotation = 0 end)
+	else
+		self._starIcon:SetColor(on and accentLight() or Theme.SubText)
+	end
+	for _, tab in ipairs(self._tabs) do
+		tab:_applyStarGutter(animate)
+		tab:_updateTabStar(animate)
+		tab:_applyLabelWidth(animate)
+	end
+	self._starsUntil = os.clock() + 1
+	self:_syncStars()
+	for _, widgets in pairs(self._favWidgets) do
+		for _, widget in ipairs(widgets) do
+			if not widget.NoAutoShow then widget.Show(on, animate) end
+		end
+	end
+	if self._favHint and self._favHint.Parent then
+		self._favHint.Text = on and "Toque na estrela de um item para remover dos favoritos."
+			or "Ative a estrela no topo para favoritar ou remover itens."
+	end
+end
+
+function Window:_refreshStarsAccent(animate)
+	if self._starActive then
+		setProps(self._starActive, { BackgroundColor3 = accentSoft(0.3) }, animate, Anim.Normal)
+		setProps(self._starActiveStroke, { Color = accent() }, animate, Anim.Normal)
+		if self._starsOn then self._starIcon:SetColor(accentLight()) end
+	end
+	for _, widgets in pairs(self._favWidgets) do
+		for _, widget in ipairs(widgets) do widget.Refresh() end
+	end
+	if self._favoritesTab and self._selectedTab == self._favoritesTab then
+		self:_rebuildFavorites(false)
+	end
+end
+
+function Window:_resolveFavorites()
+	local items = {}
+	for _, tab in ipairs(self:_ordered()) do
+		if not tab._isFavorites then
+			if tab._favKey and self._favorites[tab._favKey] then
+				table.insert(items, {
+					Key = tab._favKey, Name = tab._name, Path = "Menu lateral",
+					KindLabel = KindInfo.Tab.Label, Kind = "Tab", Tab = tab,
+				})
+			end
+			for _, entry in ipairs(tab._entries) do
+				if entry.FavKey and self._favorites[entry.FavKey] then
+					local info = KindInfo[entry.Kind] or KindInfo.Label or { Label = "Item" }
+					local path = tab._name
+					if entry.SectionEntry then
+						path = path .. " / " .. tostring(entry.SectionEntry.GetName())
+					end
+					table.insert(items, {
+						Key = entry.FavKey, Name = tostring(entry.GetName()), Path = path,
+						KindLabel = info.Label, Kind = entry.Kind, Tab = tab, Entry = entry,
+					})
+				end
+			end
+		end
+	end
+	return items
+end
+
+function Window:_rebuildFavorites(animate)
+	local tab = self._favoritesTab
+	if not tab or self._state == "Destroyed" then return end
+	local page = tab._page
+	for _, child in ipairs(page:GetChildren()) do
+		if child:IsA("GuiObject") then child:Destroy() end
+	end
+	local m = self._metrics
+	local items = self:_resolveFavorites()
+	local rowH = m.Row + 8
+	local fast = animate and not State.LowPerformance
+
+	local function card(order, text, height, name)
+		local label = create("TextLabel", {
+			Name = name, LayoutOrder = order, Size = UDim2.new(1, 0, 0, height),
+			BackgroundColor3 = Theme.Surface, Text = text, Font = Theme.Font,
+			TextSize = m.Text - 1, TextColor3 = Theme.SubText, TextWrapped = true,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextXAlignment = Enum.TextXAlignment.Left, Parent = page,
+		})
+		addCorner(label, 10)
+		addPadding(label, 12, 0, 12, 0)
+		addStroke(label, Theme.StrokeSoft, 0.55, 1)
+		return label
+	end
+
+	self._favHint = card(1, self._starsOn and "Toque na estrela de um item para remover dos favoritos."
+		or "Ative a estrela no topo para favoritar ou remover itens.", m.Row - 4, "Hint")
+
+	if #items == 0 then
+		card(2, "Nenhum favorito ainda.\nAtive a estrela no topo e marque abas, secoes e componentes para te-los aqui.", 78, "Empty")
+		tab:_refresh()
+		return
+	end
+
+	for i, item in ipairs(items) do
+		local holder = create("CanvasGroup", {
+			Name = "Fav" .. i, LayoutOrder = 10 + i, BackgroundTransparency = 1,
+			Size = UDim2.new(1, 0, 0, rowH), GroupTransparency = fast and 1 or 0, Parent = page,
+		})
+		local btn = create("TextButton", {
+			Name = "Row", Size = UDim2.fromScale(1, 1), BackgroundColor3 = Theme.Element,
+			AutoButtonColor = false, Text = "", Parent = holder,
+		})
+		addCorner(btn, 10)
+		local stroke = addStroke(btn, Theme.StrokeSoft, 0.35, 1)
+		local btnScale = create("UIScale", { Parent = btn })
+		local badge = create("Frame", {
+			Name = "Badge", AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 10, 0.5, 0),
+			Size = UDim2.fromOffset(28, 28), BackgroundColor3 = accentSoft(0.16), Parent = btn,
+		})
+		addCorner(badge, 8)
+		local icon = createIcon(KindIcons[item.Kind] or "star", badge, m.Icon, accentLight())
+		if icon then
+			icon.Instance.AnchorPoint = Vector2.new(0.5, 0.5)
+			icon.Instance.Position = UDim2.fromScale(0.5, 0.5)
+		end
+		local textX = 10 + 28 + 10
+		local reserve = textX + starSize() + 16
+		local nameH = math.floor(rowH * 0.5) - 2
+		create("TextLabel", {
+			Name = "Name", BackgroundTransparency = 1, Position = UDim2.fromOffset(textX, 5),
+			Size = UDim2.new(1, -reserve, 0, nameH), Text = item.Name, Font = Theme.Font,
+			TextSize = m.Text, TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd, Parent = btn,
+		})
+		create("TextLabel", {
+			Name = "Path", BackgroundTransparency = 1, Position = UDim2.fromOffset(textX, nameH + 6),
+			Size = UDim2.new(1, -reserve, 0, rowH - nameH - 11),
+			Text = item.KindLabel .. "  -  " .. item.Path, Font = Theme.Font,
+			TextSize = m.Text - 3, TextColor3 = Theme.Muted, TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd, Parent = btn,
+		})
+
+		local removing = false
+		local star = self:_newStar(btn, starSize(), item.Key, function()
+			if removing then return end
+			removing = true
+			self:_setFavorite(item.Key, false, true)
+			tween(holder, Anim.Normal, { GroupTransparency = 1 })
+			local shrink = tween(holder, Anim.Normal, { Size = UDim2.new(1, 0, 0, 0) },
+				Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+			shrink.Completed:Connect(function() self:_rebuildFavorites(false) end)
+		end)
+		star.Root.Position = UDim2.new(1, -(starSize() / 2 + 12), 0.5, 0)
+
+		btn.MouseEnter:Connect(function()
+			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.ElementHover })
+			tween(stroke, Anim.Fast, { Color = accent(), Transparency = 0.55 })
+		end)
+		btn.MouseLeave:Connect(function()
+			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.Element })
+			tween(stroke, Anim.Fast, { Color = Theme.StrokeSoft, Transparency = 0.35 })
+		end)
+		btn.MouseButton1Down:Connect(function() tween(btnScale, Anim.Micro, { Scale = 0.985 }) end)
+		btn.MouseButton1Up:Connect(function()
+			tween(btnScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
+		end)
+		btn.Activated:Connect(function() self:_goToEntry(item) end)
+
+		if fast then
+			btn.Position = UDim2.fromOffset(0, 10)
+			task.delay(math.min((i - 1) * 0.045, 0.3), function()
+				if not holder.Parent then return end
+				tween(holder, Anim.Smooth, { GroupTransparency = 0 })
+				tween(btn, Anim.Smooth, { Position = UDim2.fromOffset(0, 0) })
+			end)
+		end
+	end
+
+	local clear = create("TextButton", {
+		Name = "Clear", LayoutOrder = 10 + #items + 1, Size = UDim2.new(1, 0, 0, m.Row - 6),
+		BackgroundColor3 = Theme.Surface, AutoButtonColor = false, Text = "Limpar favoritos",
+		Font = Theme.Font, TextSize = m.Text - 1, TextColor3 = Theme.Muted, Parent = page,
+	})
+	addCorner(clear, 10)
+	addStroke(clear, Theme.StrokeSoft, 0.55, 1)
+	local clearScale = create("UIScale", { Parent = clear })
+	clear.MouseEnter:Connect(function() tween(clear, Anim.Fast, { TextColor3 = Theme.Danger }) end)
+	clear.MouseLeave:Connect(function() tween(clear, Anim.Fast, { TextColor3 = Theme.Muted }) end)
+	clear.MouseButton1Down:Connect(function() tween(clearScale, Anim.Micro, { Scale = 0.97 }) end)
+	clear.MouseButton1Up:Connect(function()
+		tween(clearScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
+	end)
+	clear.Activated:Connect(function() self:ClearFavorites() end)
+	tab:_refresh()
+end
+
+function Window:_buildFavorites()
+	local tab = self:_createTab("Favoritos", "star", false, true)
+	self._favoritesTab = tab
+	self:_layoutSidebar()
+	self:_moveIndicator(false)
+	self:_onLayout(function()
+		if self._selectedTab == tab then self:_rebuildFavorites(false) end
+	end)
+end
+
+----------------------------------------------------------------
+-- Tab lateral (com hover + bounce)
+----------------------------------------------------------------
+function Window:_createTab(label, iconSpec, isSettings, isFavorites)
 	local m = self._metrics
 	if iconSpec == nil then iconSpec = guessIcon(label) end
 	local button = create("TextButton", {
@@ -2939,21 +3559,41 @@ function Window:_createTab(label, iconSpec, isSettings)
 	}, Tab)
 	tab._updateCanvas = bindCanvas(page, pageLayout, "Y", 20)
 	table.insert(self._tabs, tab)
+	tab._isFavorites = isFavorites == true
+	tab._scaleObj = buttonScale
+	tab._pressed = false
+	tab._starItems = {}
+	tab._starLayer = create("Frame", {
+		Name = "Stars", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1),
+		ClipsDescendants = true, ZIndex = 5, Active = false, Parent = holder,
+	})
+	if not tab._isFavorites then
+		tab._favKey = "T::" .. label
+		local widget = self:_newStar(button, starSize(), tab._favKey)
+		widget.NoAutoShow = true
+		widget.Root.Position = UDim2.new(1, -(starSize() / 2 + 6), 0.5, 0)
+		tab._starWidget = widget
+	end
+	tab:_applyStarGutter(false)
 
 	button.MouseEnter:Connect(function()
 		tab._hover = true; tab:_paint(true)
 		if self._selectedTab ~= tab then
 			tween(hoverStroke, Anim.Fast, { Transparency = 0.85 })
-			tween(buttonScale, Anim.Fast, { Scale = 1.01 })
 		end
 	end)
 	button.MouseLeave:Connect(function()
-		tab._hover = false; tab:_paint(true)
+		tab._hover = false; tab._pressed = false; tab:_paint(true)
 		tween(hoverStroke, Anim.Fast, { Transparency = 1 })
-		tween(buttonScale, Anim.Fast, { Scale = 1 })
 	end)
-	button.MouseButton1Down:Connect(function() tween(buttonScale, Anim.Micro, { Scale = 0.94 }) end)
-	button.MouseButton1Up:Connect(function() tween(buttonScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back) end)
+	button.MouseButton1Down:Connect(function()
+		tab._pressed = true
+		tween(buttonScale, Anim.Micro, { Scale = 0.94 })
+	end)
+	button.MouseButton1Up:Connect(function()
+		tab._pressed = false
+		tween(buttonScale, Anim.Spring, { Scale = tab:_restScale() }, Enum.EasingStyle.Back)
+	end)
 	button.Activated:Connect(function() self:_selectTab(tab, true) end)
 	self:_onAccent(function(animate)
 		page.ScrollBarImageColor3 = accent()
@@ -2962,7 +3602,7 @@ function Window:_createTab(label, iconSpec, isSettings)
 	end)
 	tab:_applyCollapse(self._collapsed == true, false)
 	self:_layoutSidebar()
-	if not isSettings then
+	if not isSettings and not isFavorites then
 		self._userTabs = self._userTabs + 1
 		if self._userTabs == 1 then self:_selectTab(tab, false) end
 	end
@@ -3202,6 +3842,39 @@ function Window:_showCloseConfirm()
 	local yesBtn = makeBtn("Sim", 0.5, Theme.Danger, Theme.White)
 	yesBtn.Position = UDim2.new(0.5, 6, 1, -16)
 
+	local function microButton(b)
+		local s = create("UIScale", { Parent = b })
+		b.MouseEnter:Connect(function() tween(s, Anim.Fast, { Scale = 1.04 }) end)
+		b.MouseLeave:Connect(function() tween(s, Anim.Fast, { Scale = 1 }) end)
+		b.MouseButton1Down:Connect(function() tween(s, Anim.Micro, { Scale = 0.94 }) end)
+		b.MouseButton1Up:Connect(function()
+			tween(s, Anim.Spring, { Scale = 1.04 }, Enum.EasingStyle.Back)
+		end)
+	end
+	microButton(noBtn); microButton(yesBtn)
+	if not State.LowPerformance then
+		local function reveal(object, delay, props)
+			task.delay(delay, function()
+				if object.Parent then tween(object, Anim.Smooth, props) end
+			end)
+		end
+		title.TextTransparency = 1
+		msg.TextTransparency = 1
+		title.Position = UDim2.fromOffset(20, 28)
+		msg.Position = UDim2.fromOffset(20, 56)
+		reveal(title, 0.06, { TextTransparency = 0, Position = UDim2.fromOffset(20, 20) })
+		reveal(msg, 0.12, { TextTransparency = 0, Position = UDim2.fromOffset(20, 48) })
+		for index, b in ipairs({ noBtn, yesBtn }) do
+			local finalPosition = b.Position
+			b.BackgroundTransparency = 1
+			b.TextTransparency = 1
+			b.Position = finalPosition + UDim2.fromOffset(0, 10)
+			reveal(b, 0.16 + index * 0.05, {
+				BackgroundTransparency = 0, TextTransparency = 0, Position = finalPosition,
+			})
+		end
+	end
+
 	local function closeConfirm()
 		if not layer.Parent then return end
 		local t = tween(card, Anim.Fast, {
@@ -3335,6 +4008,20 @@ function AetherUI.CreateWindow(config)
 	self._searchQuery = ""
 	self._searchFocused = false
 	self._openDropdowns = {}
+	self._favorites = {}
+	self._favOrder = {}
+	self._favWidgets = {}
+	self._starsOn = config.ShowFavoriteStars == true
+	self._starsUntil = 0
+	self._onFavChanged = config.OnFavoritesChanged
+	if typeof(config.Favorites) == "table" then
+		for _, key in ipairs(config.Favorites) do
+			if typeof(key) == "string" and not self._favorites[key] then
+				self._favorites[key] = true
+				table.insert(self._favOrder, key)
+			end
+		end
+	end
 
 	local gui = create("ScreenGui", {
 		Name = guiName, ResetOnSpawn = false, IgnoreGuiInset = true,
@@ -3471,7 +4158,7 @@ function AetherUI.CreateWindow(config)
 	})
 	table.insert(self._gradients, accentGradient)
 
-	local function makeTitleButton(iconName, hoverColor, hoverIconColor)
+	local function makeTitleButton(iconName, hoverColor, hoverIconColor, restColor)
 		local button = create("TextButton", {
 			AnchorPoint = Vector2.new(1, 0.5),
 			Size = UDim2.fromOffset(m.TitleButton, m.TitleButton),
@@ -3490,7 +4177,7 @@ function AetherUI.CreateWindow(config)
 		end)
 		button.MouseLeave:Connect(function()
 			tween(button, Anim.Fast, { BackgroundTransparency = 1 })
-			icon:Tween(Theme.SubText, Anim.Fast)
+			icon:Tween(restColor and restColor() or Theme.SubText, Anim.Fast)
 			tween(buttonScale, Anim.Fast, { Scale = 1 })
 		end)
 		button.MouseButton1Down:Connect(function()
@@ -3512,6 +4199,20 @@ function AetherUI.CreateWindow(config)
 	local minimizeButton, minimizeIcon = makeTitleButton("minus", Theme.ElementHover, Theme.Text)
 	local menuButton, menuIcon = makeTitleButton("menu", Theme.ElementHover, Theme.Text)
 	menuButton.AnchorPoint = Vector2.new(0, 0.5)
+	local starButton, starIcon = makeTitleButton("star", Theme.ElementHover, Theme.Text, function()
+		return self._starsOn and accentLight() or Theme.SubText
+	end)
+	local starActive = create("Frame", {
+		Name = "Active", Size = UDim2.fromScale(1, 1), BackgroundColor3 = accentSoft(0.3),
+		BackgroundTransparency = 1, ZIndex = 0, Parent = starButton,
+	})
+	addCorner(starActive, 8)
+	local starActiveStroke = addStroke(starActive, accent(), 1, 1)
+	self._starButton = starButton
+	self._starIcon = starIcon
+	self._starActive = starActive
+	self._starActiveStroke = starActiveStroke
+	starButton.Visible = config.FavoriteButton ~= false
 	self._closeButton = closeButton
 	self._closeIcon = closeIcon
 	self._minimizeButton = minimizeButton
@@ -3523,6 +4224,7 @@ function AetherUI.CreateWindow(config)
 	closeButton.Activated:Connect(function() self:Close() end)
 	minimizeButton.Activated:Connect(function() self:Minimize() end)
 	menuButton.Activated:Connect(function() self:ToggleSidebar() end)
+	starButton.Activated:Connect(function() self:ToggleFavoritesMode() end)
 
 	local body = create("Frame", {
 		Name = "Body", BackgroundTransparency = 1, ClipsDescendants = true,
@@ -3745,6 +4447,7 @@ function AetherUI.CreateWindow(config)
 		accentLine.BackgroundColor3 = accent()
 		ballIcon.ImageColor3 = accentLight()
 		self._ballStroke.Color = accentLight()
+		self:_refreshStarsAccent(animate)
 		titleBadgeIcon.ImageColor3 = accentLight()
 		titleBadgeStroke.Color = accentLight()
 		for _, moon in ipairs(self._moons) do moon.Image.ImageColor3 = accent() end
@@ -3754,9 +4457,17 @@ function AetherUI.CreateWindow(config)
 	end)
 
 	self:_applyLayout(false)
+	if config.FavoritesTab ~= false then self:_buildFavorites() end
 	if config.Settings ~= false then self:_buildSettings() end
 	self:_applyLayout(false)
 	self:_applyPerformance()
+	self:_applyStarsMode(false)
+
+	-- Reposiciona as estrelas dos componentes (rolagem, expansao, resize).
+	table.insert(self._connections, RunService.Heartbeat:Connect(function()
+		if self._state == "Destroyed" then return end
+		if self._starsOn or os.clock() < (self._starsUntil or 0) then self:_syncStars() end
+	end))
 
 	self:_bindCamera()
 	table.insert(self._connections, workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
@@ -3822,6 +4533,11 @@ return AetherUI
 	main:AddButton({ Name = "Notificar", Callback = function()
 		AetherUI:Notify({ Title = "Ok", Content = "Funcionando", Type = "success" })
 	end })
+
+	-- Favoritos: clique na estrela do topo (ao lado de minimizar) para mostrar/ocultar
+	-- as estrelas; use a aba "Favoritos" para acessar os itens salvos.
+	-- window:GetFavorites() -> lista de chaves (salve onde quiser);
+	-- AetherUI.CreateWindow({ Favorites = chaves, OnFavoritesChanged = fn }) restaura.
 
 	-- Search: a barra fica acima das abas. Busca abas, secoes, botoes, toggles,
 	-- sliders, dropdowns (e opcoes), cores e configuracoes; clicar no resultado
