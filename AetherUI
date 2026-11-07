@@ -1,9 +1,17 @@
 --[[
-	AetherUI v2.2.0 - Parte 1/3
+	AetherUI v2.3.0 - arquivo unico (Parte 1/3 + 2/3 + 3/3 ja unidas)
 	Inclui: cabecalho, tema, estado, utilitarios, icones,
-	        notificacoes (DisplayOrder corrigido = 990, abaixo da UI),
-	        Section e Label.
-	Cole esta parte seguida da Parte 2 e Parte 3 no mesmo ModuleScript.
+	        notificacoes (DisplayOrder 990, abaixo da UI),
+	        Section e Label, componentes, janela, busca global.
+	Cole TODO este arquivo em um unico ModuleScript.
+
+	v2.3.0:
+	  - ColorPicker: sem faixas RGB; seletor circular + tonalidades ao lado,
+	    tons, presets e campo HEX. Interacao corrigida (mouse e toque).
+	  - Search: acima das abas, indexa abas/secoes/componentes/opcoes e leva
+	    direto ao elemento (resultados clicaveis, instantaneos).
+	  - Dropdown/MultiDropdown: abrir/fechar/clique fora/um aberto por vez,
+	    mobile e PC, SetOptions/Refresh, Open/Close/Toggle/IsOpen.
 ]]
 
 local TweenService = game:GetService("TweenService")
@@ -11,9 +19,10 @@ local UserInputService = game:GetService("UserInputService")
 local TextService = game:GetService("TextService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local GuiService = game:GetService("GuiService")
 
 local AetherUI = {}
-AetherUI.Version = "2.2.0"
+AetherUI.Version = "2.3.0"
 
 local Window = {}
 Window.__index = Window
@@ -190,6 +199,36 @@ end
 local function isPointer(input)
 	return input.UserInputType == Enum.UserInputType.MouseButton1
 		or input.UserInputType == Enum.UserInputType.Touch
+end
+
+-- Posicao do ponteiro no MESMO espaco de AbsolutePosition. Como as ScreenGuis
+-- usam IgnoreGuiInset = true, soma-se o inset da barra superior.
+local function pointerPosition(input)
+	local inset = GuiService:GetGuiInset()
+	return Vector2.new(input.Position.X + inset.X, input.Position.Y + inset.Y)
+end
+
+-- Normaliza texto para busca: minusculas e sem acentos.
+local AccentMap = {}
+do
+	local groups = {
+		a = "\u{E0}\u{E1}\u{E2}\u{E3}\u{E4}\u{C0}\u{C1}\u{C2}\u{C3}\u{C4}",
+		e = "\u{E8}\u{E9}\u{EA}\u{EB}\u{C8}\u{C9}\u{CA}\u{CB}",
+		i = "\u{EC}\u{ED}\u{EE}\u{EF}\u{CC}\u{CD}\u{CE}\u{CF}",
+		o = "\u{F2}\u{F3}\u{F4}\u{F5}\u{F6}\u{D2}\u{D3}\u{D4}\u{D5}\u{D6}",
+		u = "\u{F9}\u{FA}\u{FB}\u{FC}\u{D9}\u{DA}\u{DB}\u{DC}",
+		c = "\u{E7}\u{C7}",
+		n = "\u{F1}\u{D1}",
+	}
+	for base, chars in pairs(groups) do
+		for _, code in utf8.codes(chars) do AccentMap[utf8.char(code)] = base end
+	end
+end
+local function normalizeText(text)
+	text = tostring(text == nil and "" or text)
+	local ok, result = pcall(string.gsub, text, utf8.charpattern, function(ch) return AccentMap[ch] end)
+	if ok then text = result end
+	return string.lower(text)
 end
 
 local function colorsEqual(a, b)
@@ -592,7 +631,7 @@ local function ensureNotifyHost()
 	gui = create("ScreenGui", {
 		Name = "AetherUI_Notifications",
 		ResetOnSpawn = false, IgnoreGuiInset = true,
-		DisplayOrder = 990,  -- v2.2.0: abaixo da janela (1000)
+		DisplayOrder = 990,  -- v2.3.0: abaixo da janela (1000)
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
 		Parent = resolveParent(),
 	})
@@ -784,6 +823,61 @@ function Tab:_refresh()
 	if self._updateCanvas then self._updateCanvas() end
 end
 
+-- Registra o componente no indice da busca global.
+function Tab:_register(kind, instance, getName, extra)
+	local entry = {
+		Kind = kind, Instance = instance, GetName = getName, Tab = self,
+		SectionEntry = (kind ~= "Section") and self._currentSection or nil,
+		Order = instance.LayoutOrder,
+	}
+	if extra then
+		for key, value in pairs(extra) do entry[key] = value end
+	end
+	table.insert(self._entries, entry)
+	instance.Destroying:Connect(function()
+		local index = table.find(self._entries, entry)
+		if index then table.remove(self._entries, index) end
+	end)
+	return entry
+end
+
+-- Posicao Y (no canvas da pagina) de um filho, calculada pelo layout.
+function Tab:_offsetOf(instance)
+	local items = {}
+	for _, child in ipairs(self._page:GetChildren()) do
+		if child:IsA("GuiObject") and child.Visible then table.insert(items, child) end
+	end
+	table.sort(items, function(a, b)
+		if a.LayoutOrder ~= b.LayoutOrder then return a.LayoutOrder < b.LayoutOrder end
+		return a.Name < b.Name
+	end)
+	local y = self._metrics.Pad
+	for _, child in ipairs(items) do
+		if child == instance then return y end
+		local height = child.Size.Y.Offset
+		if child.Size.Y.Scale ~= 0 then height = child.AbsoluteSize.Y end
+		y = y + height + self._metrics.Gap
+	end
+	return y
+end
+
+-- Rola a pagina so o necessario para o item (com altura final) ficar visivel.
+function Tab:_scrollIntoView(instance, finalHeight)
+	local page = self._page
+	if not instance.Parent or page.AbsoluteSize.Y <= 0 then return end
+	local scale = self._window._scale and self._window._scale.Scale or 1
+	if scale <= 0 then scale = 1 end
+	local top = self:_offsetOf(instance)
+	local viewH = page.AbsoluteSize.Y / scale
+	local current = page.CanvasPosition.Y
+	local bottom = top + (finalHeight or instance.Size.Y.Offset)
+	local target = current
+	if bottom + 12 > current + viewH then target = bottom + 12 - viewH end
+	if top - 6 < target then target = math.max(top - 6, 0) end
+	if math.abs(target - current) < 1 then return end
+	tween(page, Anim.Smooth, { CanvasPosition = Vector2.new(0, target) })
+end
+
 function Tab:AddSection(config)
 	local text = config
 	local iconSpec = nil
@@ -841,7 +935,13 @@ function Tab:AddSection(config)
 		if bar then setProps(bar, { BackgroundColor3 = accent() }, animate) end
 	end)
 	local object = { Instance = holder }
-	function object:SetText(newText) label.Text = string.upper(tostring(newText)) end
+	local rawText = tostring(text or "Section")
+	local entry = self:_register("Section", holder, function() return rawText end)
+	self._currentSection = entry
+	function object:SetText(newText)
+		rawText = tostring(newText)
+		label.Text = string.upper(rawText)
+	end
 	return object
 end
 
@@ -879,10 +979,11 @@ function Tab:AddLabel(config)
 	end)
 	local object = { Instance = label }
 	function object:SetText(newText) label.Text = tostring(newText) end
+	self:_register("Label", label, function() return label.Text end)
 	return object
 end
 -- ============================================================
--- AetherUI v2.2.0 - Parte 2/3
+-- AetherUI v2.3.0 - Parte 2/3
 -- Button, Toggle, Slider, Dropdown, MultiDropdown, ColorPicker
 -- ============================================================
 
@@ -959,12 +1060,13 @@ function Tab:AddButton(config)
 	button.Activated:Connect(function() safeCall(config.Callback) end)
 	button.InputBegan:Connect(function(input)
 		if not isPointer(input) then return end
-		local rel = Vector2.new(input.Position.X, input.Position.Y) - button.AbsolutePosition
+		local rel = pointerPosition(input) - button.AbsolutePosition
 		spawnRipple(button, UDim2.fromOffset(math.floor(rel.X), math.floor(rel.Y)),
 			accentLight(), math.max(button.AbsoluteSize.X, button.AbsoluteSize.Y) * 2)
 	end)
 	local object = { Instance = button }
 	function object:SetText(newText) button.Text = tostring(newText) end
+	self:_register("Button", button, function() return button.Text end)
 	return object
 end
 
@@ -1128,6 +1230,7 @@ function Tab:AddToggle(config)
 	end
 	function object:Get() return state end
 	function object:SetText(newText) label.Text = tostring(newText) end
+	self:_register("Toggle", row, function() return label.Text end)
 	row.MouseEnter:Connect(function()
 		tween(row, Anim.Fast, { BackgroundColor3 = Theme.ElementHover })
 		tween(rowScale, Anim.Fast, { Scale = 1.003 })
@@ -1271,10 +1374,11 @@ function Tab:AddSlider(config)
 		safeCall(config.Callback, value)
 	end
 	function object:Get() return value end
+	self:_register("Slider", holder, function() return nameLabel.Text end)
 	local function updateFromInput(input)
 		local width = track.AbsoluteSize.X
 		if width <= 0 then return end
-		local alpha = math.clamp((input.Position.X - track.AbsolutePosition.X) / width, 0, 1)
+		local alpha = math.clamp((pointerPosition(input).X - track.AbsolutePosition.X) / width, 0, 1)
 		object:Set(min + (max - min) * alpha)
 	end
 	local function startDragging()
@@ -1312,212 +1416,29 @@ function Tab:AddSlider(config)
 end
 
 ----------------------------------------------------------------
--- Dropdown (NOVO) - selecao unica com painel expansivel
+-- Dropdown / MultiDropdown - base compartilhada (v2.3.0)
+-- Abrir/fechar, clique fora, apenas um aberto por vez, mobile e PC.
 ----------------------------------------------------------------
-function Tab:AddDropdown(config)
-	config = config or {}
-	local win = self._window
-	local m = self._metrics
-	local options = config.Options or {}
-	local selected = config.Default
-	if config.Multi ~= true and selected ~= nil and not table.find(options, selected) then
-		selected = nil
-	end
-
-	local root = create("Frame", {
-		Name = "Dropdown", LayoutOrder = self:_nextOrder(),
-		Size = UDim2.new(1, 0, 0, m.Row),
-		BackgroundColor3 = Theme.Element, Parent = self._page,
-	})
-	addCorner(root, 10)
-	local rootStroke = addStroke(root, Theme.StrokeSoft, 0.35, 1)
-
-	local header = create("TextButton", {
-		Name = "Header", Size = UDim2.new(1, 0, 0, m.Row),
-		BackgroundTransparency = 1, Text = "",
-		AutoButtonColor = false, Parent = root,
-	})
-	local lead = createIcon(config.Icon, header, m.Icon, Theme.SubText)
-	if lead then
-		lead.Instance.AnchorPoint = Vector2.new(0, 0.5)
-		lead.Instance.Position = UDim2.new(0, 14, 0.5, 0)
-	end
-	local label = create("TextLabel", {
-		Name = "Label", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(14, 0), Size = UDim2.new(0.5, -14, 1, 0),
-		Text = config.Name or "Selecionar", Font = Theme.Font,
-		TextSize = m.Text, TextColor3 = Theme.Text,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		TextTruncate = Enum.TextTruncate.AtEnd, Parent = header,
-	})
-	local valueLabel = create("TextLabel", {
-		Name = "Value", AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -38, 0.5, 0), Size = UDim2.new(0.5, -38, 1, 0),
-		BackgroundTransparency = 1,
-		Text = selected ~= nil and tostring(selected) or "Nenhum",
-		Font = Theme.Font, TextSize = m.Text - 1,
-		TextColor3 = selected ~= nil and accentLight() or Theme.Muted,
-		TextXAlignment = Enum.TextXAlignment.Right,
-		TextTruncate = Enum.TextTruncate.AtEnd, Parent = header,
-	})
-	local chevron = createIcon("chevron-down", header, m.Icon - 2, Theme.Muted)
-	chevron.Instance.AnchorPoint = Vector2.new(1, 0.5)
-	chevron.Instance.Position = UDim2.new(1, -14, 0.5, 0)
-
-	local panel = create("Frame", {
-		Name = "Panel", Visible = false,
-		Position = UDim2.fromOffset(0, m.Row),
-		Size = UDim2.new(1, 0, 0, 0),
-		BackgroundColor3 = Theme.Surface, Parent = root,
-	})
-	addCorner(panel, 10)
-	addStroke(panel, Theme.StrokeSoft, 0.4, 1)
-	local scroll = create("ScrollingFrame", {
-		Name = "Scroll", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(4, 4),
-		Size = UDim2.new(1, -8, 1, -8),
-		CanvasSize = UDim2.new(0, 0, 0, 0),
-		ScrollingDirection = Enum.ScrollingDirection.Y,
-		ScrollBarThickness = 3, ScrollBarImageColor3 = accent(),
-		ScrollBarImageTransparency = 0.4, Parent = panel,
-	})
-	local list = create("UIListLayout", {
-		Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder, Parent = scroll,
-	})
-
-	local expanded = false
-	local optionButtons = {}
-	local function setExpanded(value, animate)
-		expanded = value
-		local rowH = m.Compact and 28 or 32
-		local fullHeight = math.min(#options * (rowH + 2) + 8, 220)
-		if value then
-			panel.Visible = true
-			root.Size = UDim2.new(1, 0, 0, m.Row + fullHeight)
-			tween(panel, Anim.Fast, { Size = UDim2.new(1, 0, 0, fullHeight) })
-			tween(chevron.Instance, Anim.Fast, { Rotation = 180 })
-		else
-			tween(panel, Anim.Fast, { Size = UDim2.new(1, 0, 0, 0) })
-			tween(chevron.Instance, Anim.Fast, { Rotation = 0 })
-			tween(root, Anim.Fast, { Size = UDim2.new(1, 0, 0, m.Row) })
-			task.delay(Anim.Fast, function()
-				if not expanded then panel.Visible = false end
-			end)
-		end
-	end
-
-	local function paint()
-		for opt, btn in pairs(optionButtons) do
-			local isSel = (selected == opt)
-			setProps(btn.Label, {
-				TextColor3 = isSel and accentLight() or Theme.SubText,
-			}, true, Anim.Fast)
-			btn.Check.Visible = isSel
-		end
-		valueLabel.Text = selected ~= nil and tostring(selected) or "Nenhum"
-		valueLabel.TextColor3 = selected ~= nil and accentLight() or Theme.Muted
-	end
-
-	local object = { Instance = root }
-
-	function object:Set(value, silent)
-		if not table.find(options, value) then return end
-		selected = value
-		paint()
-		if not silent then safeCall(config.Callback, selected) end
-	end
-	function object:Get() return selected end
-	function object:Clear()
-		selected = nil; paint()
-		safeCall(config.Callback, nil)
-	end
-
-	local rowH = m.Compact and 28 or 32
-	for i, opt in ipairs(options) do
-		local btn = create("TextButton", {
-			Name = "Option" .. i, LayoutOrder = i,
-			Size = UDim2.new(1, 0, 0, rowH),
-			BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.4,
-			AutoButtonColor = false, Text = "", Parent = scroll,
-		})
-		addCorner(btn, 6)
-		local btnLabel = create("TextLabel", {
-			Name = "L", BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(10, 0), Size = UDim2.new(1, -40, 1, 0),
-			Text = tostring(opt), Font = Theme.Font,
-			TextSize = m.Text - 1, TextColor3 = Theme.SubText,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextTruncate = Enum.TextTruncate.AtEnd, Parent = btn,
-		})
-		local check = createIcon("check", btn, m.Icon - 4, accentLight())
-		check.Instance.AnchorPoint = Vector2.new(1, 0.5)
-		check.Instance.Position = UDim2.new(1, -10, 0.5, 0)
-		check.Instance.Visible = false
-		btn.MouseEnter:Connect(function()
-			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.ElementHover, BackgroundTransparency = 0 })
-			btnLabel.TextColor3 = Theme.Text
-		end)
-		btn.MouseLeave:Connect(function()
-			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.4 })
-			btnLabel.TextColor3 = (selected == opt) and accentLight() or Theme.SubText
-		end)
-		btn.Activated:Connect(function()
-			object:Set(opt)
-			setExpanded(false, true)
-		end)
-		optionButtons[opt] = { Button = btn, Label = btnLabel, Check = check.Instance }
-	end
-	scroll.CanvasSize = UDim2.fromOffset(0, #options * (rowH + 2))
-
-	header.Activated:Connect(function() setExpanded(not expanded, true) end)
-	win:_onLayout(function()
-		root.Size = UDim2.new(1, 0, 0, expanded and (m.Row + math.min(#options * (rowH + 2) + 8, 220)) or m.Row)
-		header.Size = UDim2.new(1, 0, 0, m.Row)
-		panel.Position = UDim2.fromOffset(0, m.Row)
-		label.TextSize = m.Text
-		valueLabel.TextSize = m.Text - 1
-		local leftX = 14
-		if lead then
-			lead:SetSize(m.Icon); leftX = 14 + m.Icon + 10
-		end
-		label.Position = UDim2.fromOffset(leftX, 0)
-		label.Size = UDim2.new(0.5, -leftX, 1, 0)
-		valueLabel.Position = UDim2.new(1, -38, 0.5, 0)
-		valueLabel.Size = UDim2.new(0.5, -38, 1, 0)
-		chevron:SetSize(m.Icon - 2)
-		chevron.Instance.Position = UDim2.new(1, -14, 0.5, 0)
-	end)
-	win:_onAccent(function(animate)
-		scroll.ScrollBarImageColor3 = accent()
-		setProps(rootStroke, { Color = Theme.StrokeSoft }, animate, Anim.Normal)
-		paint()
-	end)
-	paint()
-	return object
+local function dropdownRowHeight(m)
+	if m.Mobile then return m.Compact and 32 or 38 end
+	return m.Compact and 28 or 32
 end
 
-----------------------------------------------------------------
--- MultiDropdown (NOVO) - multipla selecao
-----------------------------------------------------------------
-function Tab:AddMultiDropdown(config)
-	config = config or {}
-	local win = self._window
-	local m = self._metrics
-	local options = config.Options or {}
-	local selected = {}
-	if typeof(config.Default) == "table" then
-		for _, v in ipairs(config.Default) do
-			if table.find(options, v) then selected[v] = true end
-		end
-	end
+local function buildDropdownShell(tab, config, className)
+	local win = tab._window
+	local m = tab._metrics
+	local shell = { Options = {}, Rows = {}, Expanded = false }
+	for i, value in ipairs(config.Options or {}) do shell.Options[i] = value end
+	win._openDropdowns = win._openDropdowns or {}
 
 	local root = create("Frame", {
-		Name = "MultiDropdown", LayoutOrder = self:_nextOrder(),
+		Name = className, LayoutOrder = tab:_nextOrder(),
 		Size = UDim2.new(1, 0, 0, m.Row),
-		BackgroundColor3 = Theme.Element, Parent = self._page,
+		BackgroundColor3 = Theme.Element, ClipsDescendants = true, Parent = tab._page,
 	})
 	addCorner(root, 10)
 	local rootStroke = addStroke(root, Theme.StrokeSoft, 0.35, 1)
+
 	local header = create("TextButton", {
 		Name = "Header", Size = UDim2.new(1, 0, 0, m.Row),
 		BackgroundTransparency = 1, Text = "",
@@ -1539,7 +1460,7 @@ function Tab:AddMultiDropdown(config)
 	local valueLabel = create("TextLabel", {
 		Name = "Value", AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, -38, 0.5, 0), Size = UDim2.new(0.5, -38, 1, 0),
-		BackgroundTransparency = 1, Text = "0",
+		BackgroundTransparency = 1, Text = "",
 		Font = Theme.Font, TextSize = m.Text - 1,
 		TextColor3 = Theme.Muted,
 		TextXAlignment = Enum.TextXAlignment.Right,
@@ -1548,11 +1469,12 @@ function Tab:AddMultiDropdown(config)
 	local chevron = createIcon("chevron-down", header, m.Icon - 2, Theme.Muted)
 	chevron.Instance.AnchorPoint = Vector2.new(1, 0.5)
 	chevron.Instance.Position = UDim2.new(1, -14, 0.5, 0)
+
 	local panel = create("Frame", {
 		Name = "Panel", Visible = false,
 		Position = UDim2.fromOffset(0, m.Row),
 		Size = UDim2.new(1, 0, 0, 0),
-		BackgroundColor3 = Theme.Surface, Parent = root,
+		BackgroundColor3 = Theme.Surface, ClipsDescendants = true, Parent = root,
 	})
 	addCorner(panel, 10)
 	addStroke(panel, Theme.StrokeSoft, 0.4, 1)
@@ -1568,13 +1490,254 @@ function Tab:AddMultiDropdown(config)
 	create("UIListLayout", {
 		Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder, Parent = scroll,
 	})
-	local rowH = m.Compact and 28 or 32
-	local expanded = false
-	local optionButtons = {}
+
+	shell.Root, shell.Header, shell.Label, shell.ValueLabel = root, header, label, valueLabel
+	shell.Chevron, shell.Panel, shell.Scroll, shell.RootStroke = chevron, panel, scroll, rootStroke
+
+	local token = {}
+	token.Close = function() shell.setExpanded(false, true) end
+
+	local function heights()
+		local rowH = dropdownRowHeight(m)
+		local content = #shell.Options * (rowH + 2) + 8
+		return math.min(content, 220), content, rowH
+	end
+
+	function shell.setExpanded(value, animate, noScroll)
+		value = value == true
+		if shell.Expanded == value then return end
+		shell.Expanded = value
+		local panelH, content = heights()
+		scroll.ScrollingEnabled = content > panelH
+		if value then
+			win:_closeDropdowns(token)
+			win._openDropdowns[token] = true
+			panel.Visible = true
+			setProps(panel, { Size = UDim2.new(1, 0, 0, panelH) }, animate, Anim.Fast)
+			setProps(root, { Size = UDim2.new(1, 0, 0, m.Row + panelH) }, animate, Anim.Fast)
+			setProps(chevron.Instance, { Rotation = 180 }, animate, Anim.Fast)
+			if not noScroll then
+				task.delay(0.1, function()
+					if shell.Expanded and root.Parent then
+						tab:_scrollIntoView(root, m.Row + panelH)
+					end
+				end)
+			end
+		else
+			win._openDropdowns[token] = nil
+			setProps(panel, { Size = UDim2.new(1, 0, 0, 0) }, animate, Anim.Fast)
+			setProps(root, { Size = UDim2.new(1, 0, 0, m.Row) }, animate, Anim.Fast)
+			setProps(chevron.Instance, { Rotation = 0 }, animate, Anim.Fast)
+			task.delay(Anim.Fast + 0.03, function()
+				if not shell.Expanded then panel.Visible = false end
+			end)
+		end
+	end
+
+	-- (Re)constroi as linhas de opcao. buildRow(opt, i, rowH) devolve
+	-- { Button = ..., Relayout = function(rowH) ... end (opcional), ... }
+	function shell.rebuild(buildRow)
+		for _, row in ipairs(shell.Rows) do row.Button:Destroy() end
+		shell.Rows = {}
+		local panelH, content, rowH = heights()
+		for i, opt in ipairs(shell.Options) do
+			shell.Rows[i] = buildRow(opt, i, rowH)
+		end
+		scroll.CanvasSize = UDim2.fromOffset(0, #shell.Options * (rowH + 2))
+		scroll.ScrollingEnabled = content > panelH
+		if shell.Expanded then
+			setProps(panel, { Size = UDim2.new(1, 0, 0, panelH) }, true, Anim.Fast)
+			setProps(root, { Size = UDim2.new(1, 0, 0, m.Row + panelH) }, true, Anim.Fast)
+		end
+	end
+
+	function shell.scrollToRow(index)
+		local rowH = dropdownRowHeight(m)
+		local y = (index - 1) * (rowH + 2)
+		scroll.CanvasPosition = Vector2.new(0, y)
+	end
+
+	function shell.relayout()
+		local panelH, content, rowH = heights()
+		root.Size = UDim2.new(1, 0, 0, shell.Expanded and (m.Row + panelH) or m.Row)
+		header.Size = UDim2.new(1, 0, 0, m.Row)
+		panel.Position = UDim2.fromOffset(0, m.Row)
+		panel.Size = UDim2.new(1, 0, 0, shell.Expanded and panelH or 0)
+		scroll.CanvasSize = UDim2.fromOffset(0, #shell.Options * (rowH + 2))
+		scroll.ScrollingEnabled = content > panelH
+		for _, row in ipairs(shell.Rows) do
+			row.Button.Size = UDim2.new(1, 0, 0, rowH)
+			if row.Relayout then row.Relayout(rowH) end
+		end
+		label.TextSize = m.Text
+		valueLabel.TextSize = m.Text - 1
+		local leftX = 14
+		if lead then
+			lead:SetSize(m.Icon); leftX = 14 + m.Icon + 10
+		end
+		label.Position = UDim2.fromOffset(leftX, 0)
+		label.Size = UDim2.new(0.5, -leftX, 1, 0)
+		valueLabel.Position = UDim2.new(1, -38, 0.5, 0)
+		valueLabel.Size = UDim2.new(0.5, -38, 1, 0)
+		chevron:SetSize(m.Icon - 2)
+		chevron.Instance.Position = UDim2.new(1, -14, 0.5, 0)
+	end
+
+	header.Activated:Connect(function() shell.setExpanded(not shell.Expanded, true) end)
+
+	-- Clique/toque fora do controle fecha o painel.
+	-- Testa as duas interpretacoes de coordenada (com e sem GuiInset) para
+	-- nunca fechar por engano ao tocar dentro do proprio dropdown.
+	table.insert(tab._connections, UserInputService.InputBegan:Connect(function(input)
+		if not shell.Expanded or not isPointer(input) then return end
+		local raw = Vector2.new(input.Position.X, input.Position.Y)
+		local inset = GuiService:GetGuiInset()
+		local pos, size = root.AbsolutePosition, root.AbsoluteSize
+		local function inside(p)
+			return p.X >= pos.X and p.X <= pos.X + size.X and p.Y >= pos.Y and p.Y <= pos.Y + size.Y
+		end
+		if not inside(raw) and not inside(raw + inset) then
+			shell.setExpanded(false, true)
+		end
+	end))
+
+	win:_onLayout(shell.relayout)
+	return shell
+end
+
+----------------------------------------------------------------
+-- Dropdown - selecao unica
+----------------------------------------------------------------
+function Tab:AddDropdown(config)
+	config = config or {}
+	local win = self._window
+	local m = self._metrics
+	local shell = buildDropdownShell(self, config, "Dropdown")
+	local options = shell.Options
+	local selected = config.Default
+	if selected ~= nil and not table.find(options, selected) then selected = nil end
+	local object = { Instance = shell.Root }
+
+	local function paint()
+		for i, row in ipairs(shell.Rows) do
+			local isSel = selected ~= nil and options[i] == selected
+			setProps(row.Label, { TextColor3 = isSel and accentLight() or Theme.SubText }, true, Anim.Fast)
+			row.Check.Visible = isSel
+		end
+		shell.ValueLabel.Text = selected ~= nil and tostring(selected) or "Nenhum"
+		shell.ValueLabel.TextColor3 = selected ~= nil and accentLight() or Theme.Muted
+	end
+
+	local function buildRow(opt, i, rowH)
+		local btn = create("TextButton", {
+			Name = "Option" .. i, LayoutOrder = i,
+			Size = UDim2.new(1, 0, 0, rowH),
+			BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.4,
+			AutoButtonColor = false, Text = "", Parent = shell.Scroll,
+		})
+		addCorner(btn, 6)
+		local btnLabel = create("TextLabel", {
+			Name = "L", BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(10, 0), Size = UDim2.new(1, -40, 1, 0),
+			Text = tostring(opt), Font = Theme.Font,
+			TextSize = m.Text - 1,
+			TextColor3 = (selected ~= nil and opt == selected) and accentLight() or Theme.SubText,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd, Parent = btn,
+		})
+		local check = createIcon("check", btn, m.Icon - 4, accentLight())
+		check.Instance.AnchorPoint = Vector2.new(1, 0.5)
+		check.Instance.Position = UDim2.new(1, -10, 0.5, 0)
+		check.Instance.Visible = selected ~= nil and opt == selected
+		btn.MouseEnter:Connect(function()
+			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.ElementHover, BackgroundTransparency = 0 })
+			btnLabel.TextColor3 = Theme.Text
+		end)
+		btn.MouseLeave:Connect(function()
+			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.4 })
+			btnLabel.TextColor3 = (selected ~= nil and opt == selected) and accentLight() or Theme.SubText
+		end)
+		btn.Activated:Connect(function()
+			object:Set(opt)
+			shell.setExpanded(false, true)
+		end)
+		return {
+			Button = btn, Label = btnLabel, Check = check.Instance,
+			Relayout = function()
+				btnLabel.TextSize = m.Text - 1
+				check:SetSize(m.Icon - 4)
+				check.Instance.Position = UDim2.new(1, -10, 0.5, 0)
+			end,
+		}
+	end
+
+	function object:Set(value, silent)
+		if not table.find(options, value) then return end
+		selected = value
+		paint()
+		if not silent then safeCall(config.Callback, selected) end
+	end
+	function object:Get() return selected end
+	function object:Clear()
+		selected = nil; paint()
+		safeCall(config.Callback, nil)
+	end
+	function object:SetOptions(newOptions, silent)
+		if typeof(newOptions) ~= "table" then return end
+		table.clear(options)
+		for i, value in ipairs(newOptions) do options[i] = value end
+		local changed = false
+		if selected ~= nil and not table.find(options, selected) then
+			selected = nil; changed = true
+		end
+		shell.rebuild(buildRow)
+		paint()
+		if changed and not silent then safeCall(config.Callback, selected) end
+	end
+	object.Refresh = object.SetOptions
+	function object:Open() shell.setExpanded(true, true) end
+	function object:Close() shell.setExpanded(false, true) end
+	function object:Toggle() shell.setExpanded(not shell.Expanded, true) end
+	function object:IsOpen() return shell.Expanded end
+	function object:SetText(newText) shell.Label.Text = tostring(newText) end
+
+	shell.rebuild(buildRow)
+	win:_onAccent(function(animate)
+		shell.Scroll.ScrollBarImageColor3 = accent()
+		paint()
+	end)
+	paint()
+	self:_register("Dropdown", shell.Root, function() return shell.Label.Text end, {
+		Options = options, FlashTarget = shell.Header,
+		Open = function() shell.setExpanded(true, true, true) end,
+		RowFor = function(i) return shell.Rows[i] and shell.Rows[i].Button or nil end,
+		ScrollToRow = shell.scrollToRow,
+	})
+	return object
+end
+
+----------------------------------------------------------------
+-- MultiDropdown - multipla selecao
+----------------------------------------------------------------
+function Tab:AddMultiDropdown(config)
+	config = config or {}
+	local win = self._window
+	local m = self._metrics
+	local shell = buildDropdownShell(self, config, "MultiDropdown")
+	local options = shell.Options
+	local selected = {}
+	if typeof(config.Default) == "table" then
+		for _, v in ipairs(config.Default) do
+			if table.find(options, v) then selected[v] = true end
+		end
+	end
+	local object = { Instance = shell.Root }
 
 	local function countSelected()
 		local n = 0
-		for _ in pairs(selected) do n = n + 1 end
+		for _, opt in ipairs(options) do
+			if selected[opt] then n = n + 1 end
+		end
 		return n
 	end
 	local function listSelected()
@@ -1585,39 +1748,60 @@ function Tab:AddMultiDropdown(config)
 		return out
 	end
 	local function paint()
-		for opt, btn in pairs(optionButtons) do
-			local on = selected[opt] == true
-			btn.Check.Visible = on
-			setProps(btn.Box, {
-				BackgroundColor3 = on and accent() or Theme.OffDeep,
-			}, true, Anim.Fast)
-			setProps(btn.Label, {
-				TextColor3 = on and accentLight() or Theme.SubText,
-			}, true, Anim.Fast)
+		for i, row in ipairs(shell.Rows) do
+			local on = selected[options[i]] == true
+			row.Check.Visible = on
+			setProps(row.Box, { BackgroundColor3 = on and accent() or Theme.OffDeep }, true, Anim.Fast)
+			setProps(row.Label, { TextColor3 = on and accentLight() or Theme.SubText }, true, Anim.Fast)
 		end
 		local n = countSelected()
-		valueLabel.Text = n == 0 and "0" or (n .. " selecionado" .. (n > 1 and "s" or ""))
-		valueLabel.TextColor3 = n > 0 and accentLight() or Theme.Muted
-	end
-	local function setExpanded(value)
-		expanded = value
-		local fullHeight = math.min(#options * (rowH + 2) + 8, 220)
-		if value then
-			panel.Visible = true
-			root.Size = UDim2.new(1, 0, 0, m.Row + fullHeight)
-			tween(panel, Anim.Fast, { Size = UDim2.new(1, 0, 0, fullHeight) })
-			tween(chevron.Instance, Anim.Fast, { Rotation = 180 })
-		else
-			tween(panel, Anim.Fast, { Size = UDim2.new(1, 0, 0, 0) })
-			tween(chevron.Instance, Anim.Fast, { Rotation = 0 })
-			tween(root, Anim.Fast, { Size = UDim2.new(1, 0, 0, m.Row) })
-			task.delay(Anim.Fast, function()
-				if not expanded then panel.Visible = false end
-			end)
-		end
+		shell.ValueLabel.Text = n == 0 and "0" or (n .. " selecionado" .. (n > 1 and "s" or ""))
+		shell.ValueLabel.TextColor3 = n > 0 and accentLight() or Theme.Muted
 	end
 
-	local object = { Instance = root }
+	local function buildRow(opt, i, rowH)
+		local on = selected[opt] == true
+		local btn = create("TextButton", {
+			Name = "Option" .. i, LayoutOrder = i,
+			Size = UDim2.new(1, 0, 0, rowH),
+			BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.4,
+			AutoButtonColor = false, Text = "", Parent = shell.Scroll,
+		})
+		addCorner(btn, 6)
+		local box = create("Frame", {
+			Name = "Box", Position = UDim2.fromOffset(8, (rowH - 16) / 2),
+			Size = UDim2.fromOffset(16, 16),
+			BackgroundColor3 = on and accent() or Theme.OffDeep, Parent = btn,
+		})
+		addCorner(box, 4)
+		local btnLabel = create("TextLabel", {
+			Name = "L", BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(32, 0), Size = UDim2.new(1, -40, 1, 0),
+			Text = tostring(opt), Font = Theme.Font,
+			TextSize = m.Text - 1, TextColor3 = on and accentLight() or Theme.SubText,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd, Parent = btn,
+		})
+		local check = createIcon("check", box, 10, Theme.White)
+		check.Instance.AnchorPoint = Vector2.new(0.5, 0.5)
+		check.Instance.Position = UDim2.fromScale(0.5, 0.5)
+		check.Instance.Visible = on
+		btn.MouseEnter:Connect(function()
+			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.ElementHover, BackgroundTransparency = 0 })
+		end)
+		btn.MouseLeave:Connect(function()
+			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.4 })
+		end)
+		btn.Activated:Connect(function() object:Toggle(opt) end)
+		return {
+			Button = btn, Label = btnLabel, Check = check.Instance, Box = box,
+			Relayout = function(newRowH)
+				box.Position = UDim2.fromOffset(8, (newRowH - 16) / 2)
+				btnLabel.TextSize = m.Text - 1
+			end,
+		}
+	end
+
 	function object:Set(values, silent)
 		if typeof(values) ~= "table" then return end
 		selected = {}
@@ -1638,69 +1822,43 @@ function Tab:AddMultiDropdown(config)
 		selected = {}; paint()
 		safeCall(config.Callback, {})
 	end
-
-	for i, opt in ipairs(options) do
-		local btn = create("TextButton", {
-			Name = "Option" .. i, LayoutOrder = i,
-			Size = UDim2.new(1, 0, 0, rowH),
-			BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.4,
-			AutoButtonColor = false, Text = "", Parent = scroll,
-		})
-		addCorner(btn, 6)
-		local box = create("Frame", {
-			Name = "Box", Position = UDim2.fromOffset(8, (rowH - 16) / 2),
-			Size = UDim2.fromOffset(16, 16),
-			BackgroundColor3 = selected[opt] and accent() or Theme.OffDeep, Parent = btn,
-		})
-		addCorner(box, 4)
-		local btnLabel = create("TextLabel", {
-			Name = "L", BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(32, 0), Size = UDim2.new(1, -40, 1, 0),
-			Text = tostring(opt), Font = Theme.Font,
-			TextSize = m.Text - 1, TextColor3 = Theme.SubText,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			TextTruncate = Enum.TextTruncate.AtEnd, Parent = btn,
-		})
-		local check = createIcon("check", box, 10, Theme.White)
-		check.Instance.AnchorPoint = Vector2.new(0.5, 0.5)
-		check.Instance.Position = UDim2.fromScale(0.5, 0.5)
-		check.Instance.Visible = selected[opt] == true
-		btn.MouseEnter:Connect(function()
-			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.ElementHover, BackgroundTransparency = 0 })
-		end)
-		btn.MouseLeave:Connect(function()
-			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.4 })
-		end)
-		btn.Activated:Connect(function() object:Toggle(opt) end)
-		optionButtons[opt] = { Button = btn, Label = btnLabel, Check = check.Instance, Box = box }
+	function object:SetOptions(newOptions, silent)
+		if typeof(newOptions) ~= "table" then return end
+		table.clear(options)
+		for i, value in ipairs(newOptions) do options[i] = value end
+		local changed = false
+		for opt in pairs(selected) do
+			if not table.find(options, opt) then selected[opt] = nil; changed = true end
+		end
+		shell.rebuild(buildRow)
+		paint()
+		if changed and not silent then safeCall(config.Callback, listSelected()) end
 	end
-	scroll.CanvasSize = UDim2.fromOffset(0, #options * (rowH + 2))
-	header.Activated:Connect(function() setExpanded(not expanded) end)
-	win:_onLayout(function()
-		root.Size = UDim2.new(1, 0, 0, expanded and (m.Row + math.min(#options * (rowH + 2) + 8, 220)) or m.Row)
-		header.Size = UDim2.new(1, 0, 0, m.Row)
-		panel.Position = UDim2.fromOffset(0, m.Row)
-		label.TextSize = m.Text
-		valueLabel.TextSize = m.Text - 1
-		local leftX = 14
-		if lead then lead:SetSize(m.Icon); leftX = 14 + m.Icon + 10 end
-		label.Position = UDim2.fromOffset(leftX, 0)
-		label.Size = UDim2.new(0.5, -leftX, 1, 0)
-		chevron:SetSize(m.Icon - 2)
-		chevron.Instance.Position = UDim2.new(1, -14, 0.5, 0)
-	end)
+	object.Refresh = object.SetOptions
+	function object:Open() shell.setExpanded(true, true) end
+	function object:Close() shell.setExpanded(false, true) end
+	function object:IsOpen() return shell.Expanded end
+	function object:SetText(newText) shell.Label.Text = tostring(newText) end
+
+	shell.rebuild(buildRow)
 	win:_onAccent(function(animate)
-		scroll.ScrollBarImageColor3 = accent()
-		setProps(rootStroke, { Color = Theme.StrokeSoft }, animate, Anim.Normal)
+		shell.Scroll.ScrollBarImageColor3 = accent()
 		paint()
 	end)
 	paint()
+	self:_register("MultiDropdown", shell.Root, function() return shell.Label.Text end, {
+		Options = options, FlashTarget = shell.Header,
+		Open = function() shell.setExpanded(true, true, true) end,
+		RowFor = function(i) return shell.Rows[i] and shell.Rows[i].Button or nil end,
+		ScrollToRow = shell.scrollToRow,
+	})
 	return object
 end
 
 ----------------------------------------------------------------
--- ColorPicker AVANCADO (v2.2.0)
--- SV square + hue bar + preview + tons branco/preto/cinza + presets
+-- ColorPicker (v2.3.0)
+-- Seletor circular (quadrado SV) + painel de tonalidades (hue) ao lado,
+-- tons, presets e campo HEX. Sem faixas RGB.
 ----------------------------------------------------------------
 local function toHex(c)
 	return string.format("#%02X%02X%02X",
@@ -1708,6 +1866,26 @@ local function toHex(c)
 		math.floor(c.G * 255 + 0.5),
 		math.floor(c.B * 255 + 0.5))
 end
+
+local function parseHex(text)
+	local hex = string.match(tostring(text or ""), "^%s*#?(%x+)%s*$")
+	if not hex then return nil end
+	if #hex == 3 then
+		hex = string.sub(hex, 1, 1):rep(2) .. string.sub(hex, 2, 2):rep(2) .. string.sub(hex, 3, 3):rep(2)
+	end
+	if #hex ~= 6 then return nil end
+	local r = tonumber(string.sub(hex, 1, 2), 16)
+	local g = tonumber(string.sub(hex, 3, 4), 16)
+	local b = tonumber(string.sub(hex, 5, 6), 16)
+	if not (r and g and b) then return nil end
+	return Color3.fromRGB(r, g, b)
+end
+
+local ToneColors = {
+	Color3.fromRGB(255, 255, 255), Color3.fromRGB(220, 220, 220),
+	Color3.fromRGB(160, 160, 160), Color3.fromRGB(100, 100, 100),
+	Color3.fromRGB(50, 50, 50), Color3.fromRGB(0, 0, 0),
+}
 
 function Tab:AddColorPicker(config)
 	config = config or {}
@@ -1717,13 +1895,19 @@ function Tab:AddColorPicker(config)
 	local initial = typeof(config.Default) == "Color3" and config.Default or nil
 	local current = initial or Color3.fromRGB(255, 255, 255)
 	local h, s, v = current:ToHSV()
-	local silentFlag = false
+	local expanded = false
+	win._openDropdowns = win._openDropdowns or {}
+
+	local object = {}
+	local token = {}
+	token.Close = function() object:Close() end
 
 	local root = create("Frame", {
 		Name = "ColorPicker", LayoutOrder = self:_nextOrder(),
 		Size = UDim2.new(1, 0, 0, m.Row),
-		BackgroundColor3 = Theme.Element, Parent = self._page,
+		BackgroundColor3 = Theme.Element, ClipsDescendants = true, Parent = self._page,
 	})
+	object.Instance = root
 	addCorner(root, 10)
 	addStroke(root, Theme.StrokeSoft, 0.35, 1)
 
@@ -1757,54 +1941,58 @@ function Tab:AddColorPicker(config)
 	chevron.Instance.AnchorPoint = Vector2.new(1, 0.5)
 	chevron.Instance.Position = UDim2.new(1, -14, 0.5, 0)
 
+	-- Painel: lista vertical com altura calculada automaticamente
 	local panel = create("Frame", {
 		Name = "Panel", Visible = false,
 		Position = UDim2.fromOffset(0, m.Row),
 		Size = UDim2.new(1, 0, 0, 0),
-		BackgroundColor3 = Theme.Surface, Parent = root,
+		BackgroundColor3 = Theme.Surface, ClipsDescendants = true, Parent = root,
 	})
 	addCorner(panel, 10)
 	addStroke(panel, Theme.StrokeSoft, 0.4, 1)
-	local panelPad = addPadding(panel, 10, 10, 10, 10)
+	addPadding(panel, 10, 10, 10, 10)
+	local panelLayout = create("UIListLayout", {
+		Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder, Parent = panel,
+	})
 
-	-- SV square
+	-- Linha 1: quadrado SV (seletor circular) + faixa de tonalidades ao lado
+	local pickH = m.Mobile and 124 or 112
+	local hueW = m.Mobile and 24 or 18
+	local pickRow = create("Frame", {
+		Name = "Pick", LayoutOrder = 1,
+		Size = UDim2.new(1, 0, 0, pickH), BackgroundTransparency = 1, Parent = panel,
+	})
 	local svSquare = create("Frame", {
-		Name = "SV", Size = UDim2.new(1, 0, 0, 110),
-		BackgroundColor3 = Color3.fromHSV(h, 1, 1),
-		ClipsDescendants = true, Parent = panel,
+		Name = "SV", Size = UDim2.new(1, -(hueW + 10), 1, 0),
+		BackgroundColor3 = Color3.fromHSV(h, 1, 1), Parent = pickRow,
 	})
 	addCorner(svSquare, 8)
-	-- Overlay: branco -> transparente (saturacao horizontal)
 	local satOverlay = create("Frame", {
 		Name = "Sat", Size = UDim2.fromScale(1, 1),
 		BackgroundColor3 = Theme.White, Parent = svSquare,
 	})
 	addCorner(satOverlay, 8)
-	local satGrad = create("UIGradient", {
+	create("UIGradient", {
 		Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0),
-			NumberSequenceKeypoint.new(1, 1),
+			NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1),
 		}),
 		Rotation = 0, Parent = satOverlay,
 	})
-	-- Overlay: transparente -> preto (valor vertical)
 	local valOverlay = create("Frame", {
 		Name = "Val", Size = UDim2.fromScale(1, 1),
 		BackgroundColor3 = Theme.Black, Parent = svSquare,
 	})
 	addCorner(valOverlay, 8)
-	local valGrad = create("UIGradient", {
+	create("UIGradient", {
 		Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 1),
-			NumberSequenceKeypoint.new(1, 0),
+			NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0),
 		}),
 		Rotation = 90, Parent = valOverlay,
 	})
-	-- Seletor SV
 	local svSelector = create("Frame", {
 		Name = "Selector", AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(s, 1 - v),
-		Size = UDim2.fromOffset(14, 14), BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(16, 16), BackgroundColor3 = current,
 		ZIndex = 5, Parent = svSquare,
 	})
 	addCornerScale(svSelector, 0.5)
@@ -1818,14 +2006,13 @@ function Tab:AddColorPicker(config)
 		AutoButtonColor = false, ZIndex = 4, Parent = svSquare,
 	})
 
-	-- Hue bar
 	local hueBar = create("Frame", {
-		Name = "Hue", Position = UDim2.fromOffset(0, 122),
-		Size = UDim2.new(1, 0, 0, 14),
-		BackgroundColor3 = Theme.White, Parent = panel,
+		Name = "Hue", AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 0, 0), Size = UDim2.new(0, hueW, 1, 0),
+		BackgroundColor3 = Theme.White, Parent = pickRow,
 	})
-	addCorner(hueBar, 7)
-	local hueGrad = create("UIGradient", {
+	addCorner(hueBar, 8)
+	create("UIGradient", {
 		Color = ColorSequence.new({
 			ColorSequenceKeypoint.new(0.000, Color3.fromHSV(0.000, 1, 1)),
 			ColorSequenceKeypoint.new(0.167, Color3.fromHSV(0.167, 1, 1)),
@@ -1835,240 +2022,251 @@ function Tab:AddColorPicker(config)
 			ColorSequenceKeypoint.new(0.833, Color3.fromHSV(0.833, 1, 1)),
 			ColorSequenceKeypoint.new(1.000, Color3.fromHSV(0.000, 1, 1)),
 		}),
-		Parent = hueBar,
+		Rotation = 90, Parent = hueBar,
 	})
 	local hueSelector = create("Frame", {
 		Name = "Selector", AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(h, 0, 0.5, 0),
-		Size = UDim2.fromOffset(6, 20), BackgroundColor3 = Theme.White,
+		Position = UDim2.new(0.5, 0, h, 0),
+		Size = UDim2.fromOffset(hueW + 2, hueW + 2),
+		BackgroundColor3 = Color3.fromHSV(h, 1, 1),
 		ZIndex = 5, Parent = hueBar,
 	})
-	addCorner(hueSelector, 3)
+	addCornerScale(hueSelector, 0.5)
 	create("UIStroke", {
 		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-		Color = Theme.Black, Transparency = 0.5, Thickness = 1, Parent = hueSelector,
+		Color = Theme.White, Thickness = 2, Parent = hueSelector,
 	})
 	local hueHit = create("TextButton", {
 		Name = "Hit", BackgroundTransparency = 1,
-		Size = UDim2.new(1, 0, 2, 0), Position = UDim2.new(0, 0, -0.5, 0),
+		Position = UDim2.fromOffset(-6, -6), Size = UDim2.new(1, 12, 1, 12),
 		Text = "", AutoButtonColor = false, ZIndex = 4, Parent = hueBar,
 	})
 
-	-- Preview + hex
+	-- Linha 2: preview + campo HEX (editavel)
 	local infoRow = create("Frame", {
-		Name = "Info", Position = UDim2.fromOffset(0, 144),
-		Size = UDim2.new(1, 0, 0, 26),
-		BackgroundTransparency = 1, Parent = panel,
+		Name = "Info", LayoutOrder = 2,
+		Size = UDim2.new(1, 0, 0, 28), BackgroundTransparency = 1, Parent = panel,
 	})
 	local bigPreview = create("Frame", {
-		Name = "BigPreview", Size = UDim2.fromOffset(26, 26),
+		Name = "BigPreview", Size = UDim2.fromOffset(28, 28),
 		BackgroundColor3 = current, Parent = infoRow,
 	})
 	addCorner(bigPreview, 6)
 	addStroke(bigPreview, Theme.White, 0.7, 1)
-	local hexLabel = create("TextLabel", {
+	local hexBox = create("TextBox", {
 		Name = "Hex", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(34, 0), Size = UDim2.new(1, -34, 1, 0),
-		Text = toHex(current), Font = Theme.FontBold,
-		TextSize = m.Text, TextColor3 = Theme.Text,
-		TextXAlignment = Enum.TextXAlignment.Left, Parent = infoRow,
+		Position = UDim2.fromOffset(36, 0), Size = UDim2.new(1, -36, 1, 0),
+		Text = toHex(current), PlaceholderText = "#RRGGBB", Font = Theme.FontBold,
+		TextSize = m.Text, TextColor3 = Theme.Text, PlaceholderColor3 = Theme.Muted,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ClearTextOnFocus = false, Parent = infoRow,
 	})
+	addCorner(hexBox, 6)
+	addPadding(hexBox, 8, 0, 8, 0)
+	local hexStroke = addStroke(hexBox, Theme.StrokeSoft, 0.5, 1)
 
-	-- Tons (branco/preto/cinza)
-	local tonesLabel = create("TextLabel", {
-		Name = "TonesLabel", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(0, 178),
-		Size = UDim2.new(1, 0, 0, 16),
-		Text = "TONS", Font = Theme.FontBold,
-		TextSize = m.Text - 3, TextColor3 = Theme.Muted,
-		TextXAlignment = Enum.TextXAlignment.Left, Parent = panel,
-	})
-	local tonesRow = create("Frame", {
-		Name = "Tones", Position = UDim2.fromOffset(0, 196),
-		Size = UDim2.new(1, 0, 0, 24),
-		BackgroundTransparency = 1, Parent = panel,
-	})
-	local tonesLayout = create("UIListLayout", {
-		FillDirection = Enum.FillDirection.Horizontal,
-		Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder, Parent = tonesRow,
-	})
-	local toneColors = {
-		Color3.fromRGB(255, 255, 255),
-		Color3.fromRGB(220, 220, 220),
-		Color3.fromRGB(160, 160, 160),
-		Color3.fromRGB(100, 100, 100),
-		Color3.fromRGB(50, 50, 50),
-		Color3.fromRGB(0, 0, 0),
-	}
-	local toneButtons = {}
-	for i, tc in ipairs(toneColors) do
-		local tb = create("TextButton", {
-			Name = "Tone" .. i, LayoutOrder = i,
-			Size = UDim2.fromOffset(24, 24),
-			BackgroundColor3 = tc, AutoButtonColor = false,
-			Text = "", Parent = tonesRow,
+	-- Tons e presets (grade que quebra linha sozinha)
+	local cell = m.Mobile and 28 or 24
+	local toneButtons, presetButtons = {}, {}
+	local function makeGrid(order, title, colors, circular, store, onPick)
+		create("TextLabel", {
+			Name = title .. "Label", LayoutOrder = order, BackgroundTransparency = 1,
+			Size = UDim2.new(1, 0, 0, 14), Text = title, Font = Theme.FontBold,
+			TextSize = m.Text - 3, TextColor3 = Theme.Muted,
+			TextXAlignment = Enum.TextXAlignment.Left, Parent = panel,
 		})
-		addCorner(tb, 6)
-		addStroke(tb, Theme.StrokeSoft, 0.5, 1)
-		tb.Activated:Connect(function()
-			current = tc
-			h, s, v = current:ToHSV()
-			object:Set(current)
-		end)
-		toneButtons[i] = { Button = tb, Color = tc }
-	end
-
-	-- Presets
-	local presetsLabel = create("TextLabel", {
-		Name = "PresetsLabel", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(0, 228),
-		Size = UDim2.new(1, 0, 0, 16),
-		Text = "PRESETS", Font = Theme.FontBold,
-		TextSize = m.Text - 3, TextColor3 = Theme.Muted,
-		TextXAlignment = Enum.TextXAlignment.Left, Parent = panel,
-	})
-	local presetsRow = create("Frame", {
-		Name = "Presets", Position = UDim2.fromOffset(0, 246),
-		Size = UDim2.new(1, 0, 0, 24),
-		BackgroundTransparency = 1, Parent = panel,
-	})
-	local presetsLayout = create("UIGridLayout", {
-		CellSize = UDim2.fromOffset(24, 24),
-		CellPadding = UDim2.fromOffset(6, 6),
-		SortOrder = Enum.SortOrder.LayoutOrder, Parent = presetsRow,
-	})
-	local presetButtons = {}
-	for i, pc in ipairs(presets) do
-		local pb = create("TextButton", {
-			Name = "Preset" .. i, LayoutOrder = i,
-			Size = UDim2.fromOffset(24, 24),
-			BackgroundColor3 = pc, AutoButtonColor = false,
-			Text = "", Parent = presetsRow,
+		local row = create("Frame", {
+			Name = title, LayoutOrder = order + 1, BackgroundTransparency = 1,
+			Size = UDim2.new(1, 0, 0, cell), AutomaticSize = Enum.AutomaticSize.Y, Parent = panel,
 		})
-		addCornerScale(pb, 0.5)
-		addStroke(pb, Theme.White, 0.85, 1)
-		pb.MouseEnter:Connect(function() end)
-		pb.Activated:Connect(function()
-			current = pc
-			h, s, v = current:ToHSV()
-			object:Set(current)
-		end)
-		presetButtons[i] = { Button = pb, Color = pc }
-	end
-	presetsLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function() end)
-
-	local expanded = false
-	local panelContentHeight = 246 + 24 + 14 -- presets bottom + padding
-	local function setExpanded(value)
-		expanded = value
-		if value then
-			panel.Visible = true
-			root.Size = UDim2.new(1, 0, 0, m.Row + panelContentHeight)
-			tween(panel, Anim.Fast, { Size = UDim2.new(1, 0, 0, panelContentHeight) })
-			tween(chevron.Instance, Anim.Fast, { Rotation = 180 })
-		else
-			tween(panel, Anim.Fast, { Size = UDim2.new(1, 0, 0, 0) })
-			tween(chevron.Instance, Anim.Fast, { Rotation = 0 })
-			tween(root, Anim.Fast, { Size = UDim2.new(1, 0, 0, m.Row) })
-			task.delay(Anim.Fast, function()
-				if not expanded then panel.Visible = false end
-			end)
+		create("UIGridLayout", {
+			CellSize = UDim2.fromOffset(cell, cell), CellPadding = UDim2.fromOffset(6, 6),
+			SortOrder = Enum.SortOrder.LayoutOrder, Parent = row,
+		})
+		for i, color in ipairs(colors) do
+			local b = create("TextButton", {
+				Name = title .. i, LayoutOrder = i,
+				BackgroundColor3 = color, AutoButtonColor = false, Text = "", Parent = row,
+			})
+			if circular then addCornerScale(b, 0.5) else addCorner(b, 6) end
+			local stroke = addStroke(b, circular and Theme.White or Theme.StrokeSoft, circular and 0.85 or 0.5, 1)
+			b.Activated:Connect(function() onPick(color) end)
+			store[i] = {
+				Button = b, Color = color, Stroke = stroke,
+				Base = circular and 0.85 or 0.5,
+				BaseColor = circular and Theme.White or Theme.StrokeSoft,
+			}
 		end
 	end
+	makeGrid(3, "TONS", ToneColors, false, toneButtons, function(c) object:Set(c) end)
+	makeGrid(5, "PRESETS", presets, true, presetButtons, function(c) object:Set(c) end)
 
-	local object = { Instance = root }
+	-- Altura do painel acompanha o conteudo
+	local function contentHeight()
+		return math.max(panelLayout.AbsoluteContentSize.Y + 20, pickH + 20)
+	end
+	local function applyHeights(animate)
+		if not expanded then return end
+		local ph = contentHeight()
+		setProps(panel, { Size = UDim2.new(1, 0, 0, ph) }, animate, Anim.Fast)
+		setProps(root, { Size = UDim2.new(1, 0, 0, m.Row + ph) }, animate, Anim.Fast)
+	end
+	panelLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+		applyHeights(false)
+	end)
 
 	local function paintUI()
 		current = Color3.fromHSV(h, s, v)
-		local hex = toHex(current)
-		hexLabel.Text = hex
+		local pure = Color3.fromHSV(h, 1, 1)
+		if not hexBox:IsFocused() then hexBox.Text = toHex(current) end
 		bigPreview.BackgroundColor3 = current
 		previewBadge.BackgroundColor3 = current
-		svSquare.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+		svSquare.BackgroundColor3 = pure
+		svSelector.BackgroundColor3 = current
 		svSelector.Position = UDim2.fromScale(s, 1 - v)
-		hueSelector.Position = UDim2.new(h, 0, 0.5, 0)
-		for _, p in pairs(presetButtons) do
-			local sel = colorsEqual(p.Color, current)
-			pcall(function()
-				p.Button.UIStroke.Transparency = sel and 0 or 0.85
-				p.Button.UIStroke.Thickness = sel and 2 or 1
-			end)
-		end
-		for _, t in pairs(toneButtons) do
-			local sel = colorsEqual(t.Color, current)
-			pcall(function()
-				t.Button.UIStroke.Transparency = sel and 0 or 0.5
-				t.Button.UIStroke.Thickness = sel and 2 or 1
-			end)
+		hueSelector.BackgroundColor3 = pure
+		hueSelector.Position = UDim2.new(0.5, 0, h, 0)
+		for _, group in ipairs({ presetButtons, toneButtons }) do
+			for _, item in ipairs(group) do
+				local sel = colorsEqual(item.Color, current)
+				item.Stroke.Transparency = sel and 0 or item.Base
+				item.Stroke.Thickness = sel and 2 or 1
+				item.Stroke.Color = sel and Theme.White or item.BaseColor
+			end
 		end
 	end
 
 	function object:Set(color, silent)
 		if typeof(color) ~= "Color3" then return end
-		h, s, v = color:ToHSV()
+		if silent and colorsEqual(color, current) then return end
+		local nh, ns, nv = color:ToHSV()
+		if ns > 0.001 and nv > 0.001 then h = nh end -- cinza/preto/branco preservam o matiz
+		s, v = ns, nv
 		paintUI()
+		current = color
 		if not silent then safeCall(config.Callback, current) end
 	end
 	function object:Get() return current end
+	function object:SetText(newText) nameLabel.Text = tostring(newText) end
 
-	-- Interacao SV
-	local draggingSV = false
-	local function updateSV(input)
-		local rect = svSquare.AbsoluteRect
-		if rect.Width <= 0 or rect.Height <= 0 then return end
-		local x = math.clamp((input.Position.X - rect.Min.X) / rect.Width, 0, 1)
-		local y = math.clamp((input.Position.Y - rect.Min.Y) / rect.Height, 0, 1)
-		s = x
-		v = 1 - y
+	-- Interacao por arraste (mouse e toque)
+	local dragging, activeInput = nil, nil
+	local function localPoint(input, gui)
+		local p = pointerPosition(input)
+		local pos, size = gui.AbsolutePosition, gui.AbsoluteSize
+		if size.X <= 0 or size.Y <= 0 then return nil, nil end
+		return math.clamp((p.X - pos.X) / size.X, 0, 1), math.clamp((p.Y - pos.Y) / size.Y, 0, 1)
+	end
+	local function updateDrag(input)
+		if dragging == "sv" then
+			local x, y = localPoint(input, svSquare)
+			if not x then return end
+			s = x; v = 1 - y
+		elseif dragging == "hue" then
+			local _, y = localPoint(input, hueBar)
+			if not y then return end
+			h = y
+		else
+			return
+		end
 		paintUI()
 		safeCall(config.Callback, current)
+	end
+	local function beginDrag(kind, input)
+		if dragging then return end
+		dragging = kind; activeInput = input
+		self._page.ScrollingEnabled = false
+		updateDrag(input)
+	end
+	local function endDrag()
+		if not dragging then return end
+		dragging = nil; activeInput = nil
+		self._page.ScrollingEnabled = true
 	end
 	svHit.InputBegan:Connect(function(input)
-		if not isPointer(input) then return end
-		draggingSV = true
-		updateSV(input)
+		if isPointer(input) then beginDrag("sv", input) end
 	end)
-	table.insert(self._connections, UserInputService.InputChanged:Connect(function(input)
-		if draggingSV and (input.UserInputType == Enum.UserInputType.MouseMovement
-			or input.UserInputType == Enum.UserInputType.Touch) then
-			updateSV(input)
-		end
-	end))
-	table.insert(self._connections, UserInputService.InputEnded:Connect(function(input)
-		if draggingSV and isPointer(input) then draggingSV = false end
-	end))
-
-	-- Interacao Hue
-	local draggingHue = false
-	local function updateHue(input)
-		local rect = hueBar.AbsoluteRect
-		if rect.Width <= 0 then return end
-		h = math.clamp((input.Position.X - rect.Min.X) / rect.Width, 0, 1)
-		paintUI()
-		safeCall(config.Callback, current)
-	end
 	hueHit.InputBegan:Connect(function(input)
-		if not isPointer(input) then return end
-		draggingHue = true
-		updateHue(input)
+		if isPointer(input) then beginDrag("hue", input) end
 	end)
 	table.insert(self._connections, UserInputService.InputChanged:Connect(function(input)
-		if draggingHue and (input.UserInputType == Enum.UserInputType.MouseMovement
-			or input.UserInputType == Enum.UserInputType.Touch) then
-			updateHue(input)
+		if not dragging then return end
+		if input.UserInputType == Enum.UserInputType.MouseMovement
+			or (input.UserInputType == Enum.UserInputType.Touch and input == activeInput) then
+			updateDrag(input)
 		end
 	end))
 	table.insert(self._connections, UserInputService.InputEnded:Connect(function(input)
-		if draggingHue and isPointer(input) then draggingHue = false end
+		if not dragging or not activeInput then return end
+		local same = input == activeInput or (input.UserInputType == Enum.UserInputType.MouseButton1
+			and activeInput.UserInputType == Enum.UserInputType.MouseButton1)
+		if same then endDrag() end
 	end))
 
-	header.Activated:Connect(function() setExpanded(not expanded) end)
+	-- Campo HEX
+	hexBox.Focused:Connect(function()
+		tween(hexStroke, Anim.Fast, { Color = accent(), Transparency = 0.2 })
+	end)
+	hexBox.FocusLost:Connect(function()
+		tween(hexStroke, Anim.Fast, { Color = Theme.StrokeSoft, Transparency = 0.5 })
+		local parsed = parseHex(hexBox.Text)
+		if parsed then object:Set(parsed) else hexBox.Text = toHex(current) end
+	end)
+
+	-- Abrir / fechar
+	local function setExpanded(value, animate, noScroll)
+		value = value == true
+		if value == expanded then return end
+		expanded = value
+		if value then
+			win:_closeDropdowns(token)
+			win._openDropdowns[token] = true
+			panel.Visible = true
+			local ph = contentHeight()
+			setProps(panel, { Size = UDim2.new(1, 0, 0, ph) }, animate, Anim.Fast)
+			setProps(root, { Size = UDim2.new(1, 0, 0, m.Row + ph) }, animate, Anim.Fast)
+			setProps(chevron.Instance, { Rotation = 180 }, animate, Anim.Fast)
+			if not noScroll then
+				task.delay(0.12, function()
+					if expanded and root.Parent then
+						self:_scrollIntoView(root, m.Row + contentHeight())
+					end
+				end)
+			end
+		else
+			endDrag()
+			win._openDropdowns[token] = nil
+			setProps(panel, { Size = UDim2.new(1, 0, 0, 0) }, animate, Anim.Fast)
+			setProps(root, { Size = UDim2.new(1, 0, 0, m.Row) }, animate, Anim.Fast)
+			setProps(chevron.Instance, { Rotation = 0 }, animate, Anim.Fast)
+			task.delay(Anim.Fast + 0.03, function()
+				if not expanded then panel.Visible = false end
+			end)
+		end
+	end
+	function object:Open() setExpanded(true, true) end
+	function object:Close() setExpanded(false, true) end
+	function object:Toggle() setExpanded(not expanded, true) end
+	function object:IsOpen() return expanded end
+
+	header.Activated:Connect(function() setExpanded(not expanded, true) end)
+	table.insert(self._connections, UserInputService.InputBegan:Connect(function(input)
+		if not expanded or not isPointer(input) then return end
+		local raw = Vector2.new(input.Position.X, input.Position.Y)
+		local inset = GuiService:GetGuiInset()
+		local pos, size = root.AbsolutePosition, root.AbsoluteSize
+		local function inside(p)
+			return p.X >= pos.X and p.X <= pos.X + size.X and p.Y >= pos.Y and p.Y <= pos.Y + size.Y
+		end
+		if not inside(raw) and not inside(raw + inset) then setExpanded(false, true) end
+	end))
+
 	win:_onLayout(function()
-		root.Size = UDim2.new(1, 0, 0, expanded and (m.Row + panelContentHeight) or m.Row)
+		root.Size = UDim2.new(1, 0, 0, expanded and (m.Row + contentHeight()) or m.Row)
 		header.Size = UDim2.new(1, 0, 0, m.Row)
 		panel.Position = UDim2.fromOffset(0, m.Row)
 		nameLabel.TextSize = m.Text
-		hexLabel.TextSize = m.Text
+		hexBox.TextSize = m.Text
 		local leftX = 14
 		if lead then lead:SetSize(m.Icon); leftX = 14 + m.Icon + 10 end
 		nameLabel.Position = UDim2.fromOffset(leftX, 0)
@@ -2078,14 +2276,14 @@ function Tab:AddColorPicker(config)
 		previewBadge.Position = UDim2.new(1, -38, 0.5, 0)
 	end)
 	win:_onAccent(function(animate)
-		setProps(root, {}, animate)
 		paintUI()
 	end)
 	paintUI()
+	self:_register("ColorPicker", root, function() return nameLabel.Text end, { FlashTarget = header })
 	return object
 end
 -- ============================================================
--- AetherUI v2.2.0 - Parte 3/3
+-- AetherUI v2.3.0 - Parte 3/3
 -- Tab internals, Window (open animation + close confirmation + search),
 -- Settings, API publica
 -- ============================================================
@@ -2149,38 +2347,6 @@ function Tab:_applyCollapse(collapsed, animate)
 			label.TextTransparency = 0
 		end
 	end
-end
-
-----------------------------------------------------------------
--- Search (lista componentes da aba selecionada)
-----------------------------------------------------------------
-function Tab:_searchItems(query)
-	local out = {}
-	local q = string.lower(tostring(query or ""))
-	if q == "" then return out end
-	for _, child in ipairs(self._page:GetChildren()) do
-		if child:IsA("GuiObject") then
-			local text = ""
-			if child:IsA("TextLabel") or child:IsA("TextButton") then
-				text = child.Text or ""
-			end
-			if text == "" then
-				local l = child:FindFirstChild("Label")
-				if l and (l:IsA("TextLabel") or l:IsA("TextButton")) then text = l.Text end
-			end
-			if text == "" then
-				local h = child:FindFirstChild("Header")
-				if h then
-					local l = h:FindFirstChild("Label")
-					if l and l:IsA("TextLabel") then text = l.Text end
-				end
-			end
-			if string.find(string.lower(text), q, 1, true) then
-				table.insert(out, { Instance = child, Text = text, ClassName = child.ClassName })
-			end
-		end
-	end
-	return out
 end
 
 ----------------------------------------------------------------
@@ -2299,8 +2465,7 @@ function Window:_applyLayout(animate)
 	self._listPadding.PaddingRight = UDim.new(0, m.SidePad)
 	self._listPadding.PaddingTop = UDim.new(0, 8)
 	self._listPadding.PaddingBottom = UDim.new(0, 8)
-	self._searchBar.Position = UDim2.fromOffset(m.SidePad, 4)
-	self._searchBar.Size = UDim2.new(1, -m.SidePad * 2, 0, m.Compact and 26 or 28)
+	self:_layoutSearch(animate)
 	self._header.Position = UDim2.fromOffset(m.Pad + 4, 8)
 	self._header.Size = UDim2.new(1, -(m.Pad * 2 + 8), 0, m.Header)
 	self._header.TextSize = m.Text + 3
@@ -2380,6 +2545,7 @@ function Window:_selectTab(tab, animate)
 	if self._selectedTab == tab then return end
 	local previous = self._selectedTab
 	self._selectedTab = tab
+	self:_closeDropdowns()
 	for _, other in ipairs(self._tabs) do
 		if other ~= tab then
 			if animate and other == previous and other._holder.Visible then
@@ -2422,7 +2588,7 @@ function Window:_selectTab(tab, animate)
 		holder.GroupTransparency = 0
 	end
 	self:_moveIndicator(animate)
-	self:_renderSearchResults("")
+	self:_clearSearch()
 end
 
 function Window:SelectTab(target)
@@ -2435,29 +2601,257 @@ function Window:SelectTab(target)
 end
 
 ----------------------------------------------------------------
--- Search: entrada, lista e resultados
+-- Search global (v2.3.0)
+-- Indexa abas, secoes, rotulos, botoes, toggles, sliders, dropdowns
+-- (e suas opcoes), cores e configuracoes. Resultados instantaneos e
+-- clicaveis: abrem a aba, rolam ate o item e o destacam.
 ----------------------------------------------------------------
-function Window:_renderSearchResults(query)
-	local results = self._selectedTab and self._selectedTab:_searchItems(query) or {}
-	self._searchResultsHolder.Visible = #results > 0
-	for _, child in ipairs(self._searchResultsHolder:GetChildren()) do
-		if child:IsA("TextButton") then child:Destroy() end
+local KindInfo = {
+	Tab = { Label = "Aba", Words = "aba tab pagina guia menu" },
+	Section = { Label = "Secao", Words = "secao section grupo categoria" },
+	Label = { Label = "Texto", Words = "texto label rotulo informacao info" },
+	Button = { Label = "Botao", Words = "botao button funcao function acao action executar" },
+	Toggle = { Label = "Toggle", Words = "toggle alternar interruptor switch ativar desativar ligar" },
+	Slider = { Label = "Slider", Words = "slider controle deslizante barra valor ajuste" },
+	Dropdown = { Label = "Dropdown", Words = "dropdown lista menu selecao selecionar escolher" },
+	MultiDropdown = { Label = "Multi", Words = "multi multidropdown dropdown lista multipla selecao varios" },
+	ColorPicker = { Label = "Cor", Words = "cor color picker seletor paleta tema" },
+	Option = { Label = "Opcao", Words = "opcao option item" },
+}
+local SettingsWords = " configuracoes configuracao settings config opcoes preferencias ajustes"
+
+function Window:_collectSearch(query)
+	local q = normalizeText(query)
+	q = string.match(q, "^%s*(.-)%s*$") or ""
+	if q == "" then return {} end
+	local tokens = {}
+	for token in string.gmatch(q, "%S+") do table.insert(tokens, token) end
+
+	local results, seq = {}, 0
+	local function evaluate(name, extra)
+		local n = normalizeText(name)
+		local hay = n .. " " .. extra
+		for _, token in ipairs(tokens) do
+			if not string.find(hay, token, 1, true) then return nil end
+		end
+		if n == q then return 100 end
+		if string.sub(n, 1, #q) == q then return 90 end
+		if string.find(" " .. n, " " .. q, 1, true) then return 80 end
+		if string.find(n, q, 1, true) then return 70 end
+		for _, token in ipairs(tokens) do
+			if not string.find(n, token, 1, true) then return 30 end
+		end
+		return 55
 	end
-	local totalH = 0
+	local function add(item, score, tabIndex, order)
+		seq = seq + 1
+		item.Score = score; item.TabIndex = tabIndex; item.Order = order; item.Seq = seq
+		table.insert(results, item)
+	end
+
+	for tabIndex, tab in ipairs(self:_ordered()) do
+		local settingsWords = tab._isSettings and SettingsWords or ""
+		local tabScore = evaluate(tab._name, normalizeText(KindInfo.Tab.Words .. settingsWords))
+		if tabScore then
+			add({
+				Name = tab._name, Path = tab._isSettings and "Configuracoes" or "Menu lateral",
+				KindLabel = KindInfo.Tab.Label, Kind = "Tab", Tab = tab,
+			}, tabScore, tabIndex, -1)
+		end
+		for _, entry in ipairs(tab._entries) do
+			local name = tostring(entry.GetName())
+			local info = KindInfo[entry.Kind] or KindInfo.Label
+			local path = tab._name
+			if entry.SectionEntry then path = path .. " / " .. tostring(entry.SectionEntry.GetName()) end
+			local score = evaluate(name, normalizeText(path .. " " .. info.Words .. settingsWords))
+			if score then
+				add({
+					Name = name, Path = path, KindLabel = info.Label,
+					Kind = entry.Kind, Tab = tab, Entry = entry,
+				}, score, tabIndex, entry.Order)
+			end
+			if entry.Options then
+				local optionWords = normalizeText(KindInfo.Option.Words)
+				for optionIndex, option in ipairs(entry.Options) do
+					local optionScore = evaluate(tostring(option), optionWords)
+					if optionScore then
+						add({
+							Name = tostring(option), Path = path .. " / " .. name,
+							KindLabel = KindInfo.Option.Label, Kind = "Option",
+							Tab = tab, Entry = entry, OptionIndex = optionIndex,
+						}, optionScore - 5, tabIndex, entry.Order + optionIndex / 1000)
+					end
+				end
+			end
+		end
+	end
+
+	table.sort(results, function(a, b)
+		if a.Score ~= b.Score then return a.Score > b.Score end
+		if a.TabIndex ~= b.TabIndex then return a.TabIndex < b.TabIndex end
+		if a.Order ~= b.Order then return a.Order < b.Order end
+		return a.Seq < b.Seq
+	end)
+	while #results > 60 do table.remove(results) end
+	return results
+end
+
+-- Barra de pesquisa acima das abas + lista de abas logo abaixo dela.
+function Window:_layoutSearch(animate)
+	local bar = self._searchBar
+	if not bar then return end
+	local m = self._metrics
+	local collapsed = self._collapsed == true
+	local sidebarWidth = collapsed and (m.SideRow + m.SidePad * 2) or m.SideWidth
+	local height = m.Compact and 26 or (m.Mobile and 32 or 28)
+	local width = sidebarWidth - m.SidePad * 2
+	local active = self._searchFocused == true or (self._searchBox and self._searchBox.Text ~= "")
+	if collapsed and active then
+		width = math.max(width, math.min(210, self._root.Size.X.Offset - m.SidePad * 2))
+	end
+	self._searchBarW, self._searchBarH = width, height
+	local size = UDim2.fromOffset(width, height)
+	bar.Position = UDim2.fromOffset(m.SidePad, 6)
+	if animate then tween(bar, Anim.Fast, { Size = size }) else bar.Size = size end
+	local top = 6 + height + 6
+	self._list.Position = UDim2.fromOffset(0, top)
+	self._list.Size = UDim2.new(1, -1, 1, -top)
+	self._searchBox.TextSize = m.Text - 1
+	self:_placeSearchPopup()
+end
+
+function Window:_placeSearchPopup()
+	local popup = self._searchPopup
+	if not popup or not popup.Visible then return end
+	local m = self._metrics
+	local bodyW = self._root.Size.X.Offset
+	local bodyH = self._root.Size.Y.Offset - m.Title
+	local top = 6 + (self._searchBarH or 28) + 6
+	local width = math.min(math.max(self._searchBarW or 120, 230), bodyW - m.SidePad * 2)
+	local contentH = (self._searchRows or 1) * ((self._searchRowH or 36) + 2) + 8
+	local maxH = math.max(bodyH - top - 8, 48)
+	popup.Position = UDim2.fromOffset(m.SidePad, top)
+	popup.Size = UDim2.fromOffset(math.max(width, 120), math.min(contentH, maxH, 280))
+end
+
+function Window:_closeDropdowns(except)
+	local open = self._openDropdowns
+	if not open then return end
+	for token in pairs(open) do
+		if token ~= except then token.Close() end
+	end
+end
+
+-- Destaque temporario no elemento encontrado.
+function Window:_flash(target)
+	if not target or not target.Parent then return end
+	local overlay = create("Frame", {
+		Name = "SearchFlash", Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = accent(), BackgroundTransparency = 0.55,
+		ZIndex = 9, Parent = target,
+	})
+	addCorner(overlay, 8)
+	local stroke = addStroke(overlay, accentLight(), 0, 1.5)
+	tween(overlay, 1.2, { BackgroundTransparency = 1 })
+	local t = tween(stroke, 1.2, { Transparency = 1 })
+	t.Completed:Connect(function()
+		if overlay.Parent then overlay:Destroy() end
+	end)
+end
+
+-- Abre a aba do resultado, rola ate o elemento e o destaca.
+function Window:_goToEntry(item)
+	if self._state == "Destroyed" then return end
+	local tab = item.Tab
+	if self._selectedTab ~= tab then self:_selectTab(tab, true) end
+	local entry = item.Entry
+	local page = tab._page
+	if not entry then
+		tween(page, Anim.Smooth, { CanvasPosition = Vector2.new(0, 0) })
+		return
+	end
+	if item.OptionIndex and entry.Open then entry.Open() end
+	task.delay(0.1, function()
+		if self._state == "Destroyed" or not entry.Instance.Parent then return end
+		local y = tab:_offsetOf(entry.Instance)
+		tween(page, Anim.Smooth, { CanvasPosition = Vector2.new(0, math.max(0, y - self._metrics.Pad - 4)) })
+		local target = entry.FlashTarget or entry.Instance
+		if item.OptionIndex and entry.RowFor then
+			if entry.ScrollToRow then entry.ScrollToRow(item.OptionIndex) end
+			target = entry.RowFor(item.OptionIndex) or target
+		end
+		self:_flash(target)
+	end)
+end
+
+function Window:_clearSearch()
+	local box = self._searchBox
+	if not box then return end
+	if box.Text ~= "" then box.Text = "" end
+	if box:IsFocused() then box:ReleaseFocus() end
+	self:_renderSearchResults("")
+	self:_layoutSearch(true)
+end
+
+function Window:_pickSearchResult(item)
+	self:_clearSearch()
+	self:_goToEntry(item)
+end
+
+function Window:_renderSearchResults(query)
+	local popup, scroll = self._searchPopup, self._searchScroll
+	if not popup then return end
+	for _, child in ipairs(scroll:GetChildren()) do
+		if child:IsA("GuiObject") then child:Destroy() end
+	end
+	self._searchResults = {}
+	if normalizeText(query) == "" then
+		popup.Visible = false
+		self._searchRows = 0
+		return
+	end
+	local m = self._metrics
+	local results = self:_collectSearch(query)
+	self._searchResults = results
+	local rowH = (m.Compact and 34 or 40) + (m.Mobile and 4 or 0)
+	self._searchRowH = rowH
+	self._searchRows = math.max(#results, 1)
+
+	if #results == 0 then
+		create("TextLabel", {
+			Name = "Empty", BackgroundTransparency = 1,
+			Size = UDim2.new(1, 0, 0, rowH), Text = "Nenhum resultado",
+			Font = Theme.Font, TextSize = m.Text - 1, TextColor3 = Theme.Muted, Parent = scroll,
+		})
+	end
 	for i, item in ipairs(results) do
 		local btn = create("TextButton", {
 			Name = "R" .. i, LayoutOrder = i,
-			Size = UDim2.new(1, 0, 0, self._metrics.Compact and 26 or 30),
+			Size = UDim2.new(1, 0, 0, rowH),
 			BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.2,
-			AutoButtonColor = false, Text = "", Parent = self._searchResultsHolder,
+			AutoButtonColor = false, Text = "", Parent = scroll,
 		})
 		addCorner(btn, 6)
 		create("TextLabel", {
-			Name = "L", BackgroundTransparency = 1,
-			Position = UDim2.fromOffset(8, 0), Size = UDim2.new(1, -16, 1, 0),
-			Text = item.Text, Font = Theme.Font,
-			TextSize = self._metrics.Text - 1, TextColor3 = Theme.SubText,
-			TextXAlignment = Enum.TextXAlignment.Left,
+			Name = "Name", BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(10, 3), Size = UDim2.new(1, -86, 0, math.floor(rowH * 0.5)),
+			Text = item.Name, Font = Theme.Font, TextSize = m.Text - 1,
+			TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd, Parent = btn,
+		})
+		create("TextLabel", {
+			Name = "Path", BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(10, math.floor(rowH * 0.5)),
+			Size = UDim2.new(1, -20, 0, math.floor(rowH * 0.5) - 3),
+			Text = item.Path, Font = Theme.Font, TextSize = m.Text - 3,
+			TextColor3 = Theme.Muted, TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd, Parent = btn,
+		})
+		create("TextLabel", {
+			Name = "Kind", AnchorPoint = Vector2.new(1, 0), BackgroundTransparency = 1,
+			Position = UDim2.new(1, -10, 0, 3), Size = UDim2.fromOffset(70, math.floor(rowH * 0.5)),
+			Text = item.KindLabel, Font = Theme.FontBold, TextSize = m.Text - 3,
+			TextColor3 = accentLight(), TextXAlignment = Enum.TextXAlignment.Right,
 			TextTruncate = Enum.TextTruncate.AtEnd, Parent = btn,
 		})
 		btn.MouseEnter:Connect(function()
@@ -2466,31 +2860,10 @@ function Window:_renderSearchResults(query)
 		btn.MouseLeave:Connect(function()
 			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.2 })
 		end)
-		btn.Activated:Connect(function()
-			if item.Instance and item.Instance.Parent then
-				self._selectedTab._page.CanvasPosition =
-					Vector2.new(0, item.Instance.AbsolutePosition.Y
-						- self._selectedTab._page.AbsolutePosition.Y
-						+ self._selectedTab._page.CanvasPosition.Y - 20)
-				local hl = create("Frame", {
-					Size = UDim2.new(1, 0, 0, item.Instance.AbsoluteSize.Y),
-					Position = UDim2.fromOffset(0, 0),
-					BackgroundColor3 = accent(), BackgroundTransparency = 0.6,
-					ZIndex = 9, Parent = item.Instance,
-				})
-				addCorner(hl, 8)
-				tween(hl, 0.8, { BackgroundTransparency = 1 }).Completed:Connect(function()
-					hl:Destroy()
-				end)
-			end
-		end)
-		totalH = totalH + btn.Size.Y.Offset + 2
+		btn.Activated:Connect(function() self:_pickSearchResult(item) end)
 	end
-	self._searchResultsHolder.Size = UDim2.new(1, 0, 0, totalH)
-	if self._searchResultsLayout then
-		self._searchResultsLayout.Parent = nil
-		self._searchResultsLayout.Parent = self._searchResultsHolder
-	end
+	popup.Visible = true
+	self:_placeSearchPopup()
 end
 
 ----------------------------------------------------------------
@@ -2547,6 +2920,7 @@ function Window:_createTab(label, iconSpec, isSettings)
 		_page = page, _pagePadding = pagePadding, _pageLayout = pageLayout,
 		_holder = holder, _button = button, _label = nameLabel, _icon = icon,
 		_metrics = m, _connections = self._connections, _order = 0,
+		_entries = {}, _currentSection = nil,
 		_hover = false, _collapsed = self._collapsed == true, _hoverStroke = hoverStroke,
 	}, Tab)
 	tab._updateCanvas = bindCanvas(page, pageLayout, "Y", 20)
@@ -2600,18 +2974,10 @@ function Window:_buildSettings()
 	self._settingsTab = tab
 	self:_layoutSidebar()
 	self:_moveIndicator(false)
-	local sliderR, sliderG, sliderB, picker
+	local picker
 	local function syncAccent()
 		if not picker then return end
-		local color = State.Accent
-		picker:Set(color, true)
-		sliderR:Set(math.floor(color.R * 255 + 0.5))
-		sliderG:Set(math.floor(color.G * 255 + 0.5))
-		sliderB:Set(math.floor(color.B * 255 + 0.5))
-	end
-	local function fromSliders()
-		if self._syncing then return end
-		AetherUI.SetAccent(Color3.fromRGB(sliderR:Get(), sliderG:Get(), sliderB:Get()))
+		picker:Set(State.Accent, true)
 	end
 	tab:AddSection({ Text = "Aparencia", Icon = "palette" })
 	picker = tab:AddColorPicker({
@@ -2621,12 +2987,6 @@ function Window:_buildSettings()
 			AetherUI.SetAccent(color)
 		end,
 	})
-	sliderR = tab:AddSlider({ Name = "Vermelho", Min = 0, Max = 255,
-		Default = math.floor(State.Accent.R * 255 + 0.5), Step = 1, Callback = fromSliders })
-	sliderG = tab:AddSlider({ Name = "Verde", Min = 0, Max = 255,
-		Default = math.floor(State.Accent.G * 255 + 0.5), Step = 1, Callback = fromSliders })
-	sliderB = tab:AddSlider({ Name = "Azul", Min = 0, Max = 255,
-		Default = math.floor(State.Accent.B * 255 + 0.5), Step = 1, Callback = fromSliders })
 	tab:AddSection({ Text = "Interface", Icon = "gauge" })
 	local toggleCompact = tab:AddToggle({
 		Name = "Modo compacto", Icon = "maximize", Default = self._compact,
@@ -2959,6 +3319,8 @@ function AetherUI.CreateWindow(config)
 	self._syncing = false
 	self._confirming = false
 	self._searchQuery = ""
+	self._searchFocused = false
+	self._openDropdowns = {}
 
 	local gui = create("ScreenGui", {
 		Name = guiName, ResetOnSpawn = false, IgnoreGuiInset = true,
@@ -3064,7 +3426,7 @@ function AetherUI.CreateWindow(config)
 		end)
 		button.InputBegan:Connect(function(input)
 			if not isPointer(input) then return end
-			local rel = Vector2.new(input.Position.X, input.Position.Y) - button.AbsolutePosition
+			local rel = pointerPosition(input) - button.AbsolutePosition
 			spawnRipple(button, UDim2.fromOffset(math.floor(rel.X), math.floor(rel.Y)),
 				hoverIconColor, math.max(button.AbsoluteSize.X, 1) * 2.2)
 		end)
@@ -3116,61 +3478,6 @@ function AetherUI.CreateWindow(config)
 	self._list = list
 	self._listPadding = addPadding(list, m.SidePad, 8, m.SidePad, 8)
 
-	-- Barra de pesquisa (search)
-	local searchBar = create("Frame", {
-		Name = "SearchBar",
-		Position = UDim2.fromOffset(m.SidePad, 4),
-		Size = UDim2.new(1, -m.SidePad * 2, 0, m.Compact and 26 or 28),
-		BackgroundColor3 = Theme.Element,
-		Parent = list,
-	})
-	addCorner(searchBar, 8)
-	local searchStroke = addStroke(searchBar, Theme.StrokeSoft, 0.4, 1)
-	local searchIcon = createIcon("search", searchBar, 12, Theme.Muted)
-	if searchIcon then
-		searchIcon.Instance.AnchorPoint = Vector2.new(0, 0.5)
-		searchIcon.Instance.Position = UDim2.new(0, 6, 0.5, 0)
-	end
-	local searchBox = create("TextBox", {
-		Name = "Box", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(24, 0), Size = UDim2.new(1, -28, 1, 0),
-		Text = "", PlaceholderText = "Pesquisar...",
-		Font = Theme.Font, TextSize = m.Text - 1,
-		TextColor3 = Theme.Text, PlaceholderColor3 = Theme.Muted,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		ClearTextOnFocus = false, Parent = searchBar,
-	})
-	self._searchBar = searchBar
-	self._searchBox = searchBox
-
-	local searchResultsHolder = create("Frame", {
-		Name = "SearchResults", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(0, (m.Compact and 26 or 28) + 4),
-		Size = UDim2.new(1, 0, 0, 0),
-		Visible = false, ZIndex = 6, Parent = list,
-	})
-	self._searchResultsHolder = searchResultsHolder
-	local searchResultsLayout = create("UIListLayout", {
-		Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder, Parent = searchResultsHolder,
-	})
-	self._searchResultsLayout = searchResultsLayout
-
-	searchBox:GetPropertyChangedSignal("Text"):Connect(function()
-		self._searchQuery = searchBox.Text
-		self:_renderSearchResults(searchBox.Text)
-		tween(searchStroke, Anim.Fast, {
-			Color = searchBox.Text ~= "" and accent() or Theme.StrokeSoft,
-		})
-	end)
-	searchBox.Focused:Connect(function()
-		tween(searchStroke, Anim.Fast, { Color = accent(), Transparency = 0.2 })
-	end)
-	searchBox.FocusLost:Connect(function()
-		if searchBox.Text == "" then
-			tween(searchStroke, Anim.Fast, { Color = Theme.StrokeSoft, Transparency = 0.4 })
-		end
-	end)
-
 	self._separator = create("Frame", {
 		Name = "Separator", BackgroundColor3 = Theme.Divider,
 		Size = UDim2.new(1, -8, 0, 1), Visible = false, Parent = list,
@@ -3219,6 +3526,101 @@ function AetherUI.CreateWindow(config)
 		Name = "Pages", BackgroundTransparency = 1, ClipsDescendants = true, Parent = content,
 	})
 
+	-- Barra de pesquisa: fica ACIMA das abas (filha do body, ZIndex alto) e a
+	-- lista de abas comeca logo abaixo dela, entao nunca ha sobreposicao.
+	local searchBar = create("Frame", {
+		Name = "SearchBar", BackgroundColor3 = Theme.Element,
+		Position = UDim2.fromOffset(m.SidePad, 6),
+		Size = UDim2.fromOffset(m.SideWidth - m.SidePad * 2, m.Compact and 26 or 28),
+		ClipsDescendants = true, ZIndex = 20, Parent = body,
+	})
+	addCorner(searchBar, 8)
+	local searchStroke = addStroke(searchBar, Theme.StrokeSoft, 0.4, 1)
+	local searchIcon = createIcon("search", searchBar, 12, Theme.Muted)
+	if searchIcon then
+		searchIcon.Instance.AnchorPoint = Vector2.new(0, 0.5)
+		searchIcon.Instance.Position = UDim2.new(0, 8, 0.5, 0)
+	end
+	local searchBox = create("TextBox", {
+		Name = "Box", BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(28, 0), Size = UDim2.new(1, -54, 1, 0),
+		Text = "", PlaceholderText = "Pesquisar...",
+		Font = Theme.Font, TextSize = m.Text - 1,
+		TextColor3 = Theme.Text, PlaceholderColor3 = Theme.Muted,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		ClearTextOnFocus = false, Parent = searchBar,
+	})
+	local searchClear = create("TextButton", {
+		Name = "Clear", AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -4, 0.5, 0), Size = UDim2.fromOffset(22, 22),
+		BackgroundTransparency = 1, Text = "", AutoButtonColor = false,
+		Visible = false, ZIndex = 4, Parent = searchBar,
+	})
+	local clearIcon = createIcon("close", searchClear, 10, Theme.Muted)
+	if clearIcon then
+		clearIcon.Instance.AnchorPoint = Vector2.new(0.5, 0.5)
+		clearIcon.Instance.Position = UDim2.fromScale(0.5, 0.5)
+	end
+	-- Toque/clique em qualquer ponto da barra (inclusive recolhida) foca o campo.
+	local searchHit = create("TextButton", {
+		Name = "Hit", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1),
+		Text = "", AutoButtonColor = false, ZIndex = 3, Parent = searchBar,
+	})
+	self._searchBar = searchBar
+	self._searchBox = searchBox
+
+	local searchPopup = create("Frame", {
+		Name = "SearchResults", BackgroundColor3 = Theme.Surface,
+		Visible = false, ClipsDescendants = true, ZIndex = 21, Parent = body,
+	})
+	addCorner(searchPopup, 10)
+	addStroke(searchPopup, Theme.Stroke, 0.25, 1)
+	local searchScroll = create("ScrollingFrame", {
+		Name = "List", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1),
+		CanvasSize = UDim2.new(0, 0, 0, 0),
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		ScrollBarThickness = 3, ScrollBarImageColor3 = accent(),
+		ScrollBarImageTransparency = 0.4, Parent = searchPopup,
+	})
+	addPadding(searchScroll, 4, 4, 4, 4)
+	local searchListLayout = create("UIListLayout", {
+		Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder, Parent = searchScroll,
+	})
+	bindCanvas(searchScroll, searchListLayout, "Y", 8)
+	self._searchPopup = searchPopup
+	self._searchScroll = searchScroll
+
+	searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+		self._searchQuery = searchBox.Text
+		searchClear.Visible = searchBox.Text ~= ""
+		self:_layoutSearch(true)
+		self:_renderSearchResults(searchBox.Text)
+		tween(searchStroke, Anim.Fast, {
+			Color = (searchBox.Text ~= "" or self._searchFocused) and accent() or Theme.StrokeSoft,
+		})
+	end)
+	searchBox.Focused:Connect(function()
+		self._searchFocused = true
+		searchHit.Visible = false
+		tween(searchStroke, Anim.Fast, { Color = accent(), Transparency = 0.2 })
+		self:_layoutSearch(true)
+		self:_renderSearchResults(searchBox.Text)
+	end)
+	searchBox.FocusLost:Connect(function(enterPressed)
+		self._searchFocused = false
+		searchHit.Visible = true
+		if searchBox.Text == "" then
+			tween(searchStroke, Anim.Fast, { Color = Theme.StrokeSoft, Transparency = 0.4 })
+		end
+		self:_layoutSearch(true)
+		local first = self._searchResults and self._searchResults[1]
+		if enterPressed and first then
+			self:_pickSearchResult(first)
+		end
+	end)
+	searchHit.Activated:Connect(function() searchBox:CaptureFocus() end)
+	searchClear.Activated:Connect(function() self:_clearSearch() end)
+
 	local viewport = getViewport()
 	local ball = create("TextButton", {
 		Name = "Ball", AnchorPoint = Vector2.new(0.5, 0.5),
@@ -3264,7 +3666,8 @@ function AetherUI.CreateWindow(config)
 		ball.TextColor3 = accentLight()
 		self._ballStroke.Color = accentLight()
 		setProps(innerStroke, { Color = Theme.White }, animate, Anim.Normal)
-		setProps(searchStroke, { Color = searchBox.Text ~= "" and accent() or Theme.StrokeSoft }, animate, Anim.Normal)
+		setProps(searchStroke, { Color = (searchBox.Text ~= "" or self._searchFocused) and accent() or Theme.StrokeSoft }, animate, Anim.Normal)
+		self._searchScroll.ScrollBarImageColor3 = accent()
 	end)
 
 	self:_applyLayout(false)
@@ -3325,7 +3728,7 @@ return AetherUI
 		Callback = function(list) print("Selecionados:", table.concat(list, ", ")) end,
 	})
 
-	-- ColorPicker avancado (roda + SV + tons + presets)
+	-- ColorPicker (seletor circular + tonalidades + tons + presets + HEX)
 	main:AddColorPicker({
 		Name = "Cor do tema", Default = Color3.fromRGB(124, 92, 255),
 		Callback = function(c) print("Cor:", c) end,
@@ -3337,6 +3740,7 @@ return AetherUI
 		AetherUI:Notify({ Title = "Ok", Content = "Funcionando", Type = "success" })
 	end })
 
-	-- Search: digite na barra do topo da sidebar para buscar qualquer
-	-- componente da aba ativa (botao, toggle, slider, dropdown, etc).
+	-- Search: a barra fica acima das abas. Busca abas, secoes, botoes, toggles,
+	-- sliders, dropdowns (e opcoes), cores e configuracoes; clicar no resultado
+	-- abre a aba e rola ate o elemento.
 ]=]
