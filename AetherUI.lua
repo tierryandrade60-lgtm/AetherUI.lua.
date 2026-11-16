@@ -5644,17 +5644,16 @@ function Window:_buildDock(config)
 		if not isMove then return end
 		local currentPos = Vector2.new(input.Position.X, input.Position.Y)
 		local totalDelta = currentPos - startPointer
-		local delta = currentPos - startPointer
-		local realDragThreshold = mobile and 18 or 10
+		local deadzone = mobile and 7 or 5
 		if not moved then
-			if totalDelta.Magnitude < realDragThreshold then return end
+			if totalDelta.Magnitude < deadzone then return end
 			moved = true
 			cancelHold()
 			setPressed(nil)
 		end
 		local nextPosition = UDim2.new(
-			startPosition.X.Scale, startPosition.X.Offset + delta.X,
-			startPosition.Y.Scale, startPosition.Y.Offset + delta.Y
+			startPosition.X.Scale, startPosition.X.Offset + totalDelta.X,
+			startPosition.Y.Scale, startPosition.Y.Offset + totalDelta.Y
 		)
 		dock.Position = self:_dockClamp(nextPosition, pillShown)
 	end
@@ -5692,8 +5691,8 @@ function Window:_buildDock(config)
 		local radius = math.max(sphere.AbsoluteSize.X, sphere.AbsoluteSize.Y) / 2 + (mobile and 12 or 6)
 		local pos, size = sphere.AbsolutePosition, sphere.AbsoluteSize
 		local function inBounds(pt)
-			return pt.X >= pos.X - 4 and pt.X <= pos.X + size.X + 4
-				and pt.Y >= pos.Y - 4 and pt.Y <= pos.Y + size.Y + 4
+			return pt.X >= pos.X - 6 and pt.X <= pos.X + size.X + 6
+				and pt.Y >= pos.Y - 6 and pt.Y <= pos.Y + size.Y + 6
 		end
 		local hitSphere = inBounds(raw) or (savedOffset and inBounds(raw + savedOffset)) or (inset.Magnitude > 0 and inBounds(raw + inset))
 		if not hitSphere then
