@@ -5,6 +5,23 @@
 	        Section e Label, componentes, janela, busca global.
 	Cole TODO este arquivo em um unico ModuleScript.
 
+	v2.6.0 (otimizacao profunda + correcao da bolinha):
+	  - Animador central: cache de TweenInfo, 1 tween ativo por propriedade
+		(sem duplicados), mescla de tweens concorrentes, animacoes de elementos
+		invisiveis/minimizados viram atribuicao direta (custo zero).
+	  - Minimizar/Restaurar reescritos: maquina de estados por tokens e timers,
+		sem depender de Tween.Completed (que era cancelado por tweens
+		concorrentes e travava o estado em Minimizing/Restoring). Tocar na
+		bolinha durante a animacao agora reverte, nunca trava.
+	  - Heartbeats sob demanda: luas (30 Hz adaptativo, 20 Hz se o FPS cair) e
+		estrelas so rodam com a janela visivel; desconectam ao minimizar.
+	  - Listeners globais de arraste (InputChanged/InputEnded) so existem
+		durante o gesto (antes: 1 por slider/seletor, sempre ligados).
+	  - Sombras: atualizacao coalescida (1x por frame) e sem reescrita redundante.
+	  - Slider: arraste sem tweens por evento (acompanha o dedo direto).
+	  - Microanimacoes: knob do toggle com compensacao de posicao, brilho no
+		toque, guardas contra flashes cancelados.
+
 	v2.5.0:
 	  - API padronizada estilo Rayfield (camada de compatibilidade sobre os Add*):
 	    Window:CreateTab, Tab:CreateSection/CreateLabel/CreateButton/CreateToggle/
@@ -54,7 +71,7 @@ local RunService = game:GetService("RunService")
 local GuiService = game:GetService("GuiService")
 
 local AetherUI = {}
-AetherUI.Version = "2.5.0"
+AetherUI.Version = "2.6.0"
 
 local Window = {}
 Window.__index = Window
@@ -140,24 +157,149 @@ local function create(className, props, children)
 	return instance
 end
 
-local function instantTween()
-	local stub = {}
-	stub.Completed = { Connect = function(_, callback)
-		task.defer(callback, Enum.PlaybackState.Completed)
-		return { Disconnect = function() end }
-	end }
-	function stub:Cancel() end
-	function stub:Play() end
-	return stub
+-- ===================================================================
+-- Animador central
+--  * TweenInfo em cache (sem alocar a cada chamada)
+--  * no maximo 1 tween ativo por propriedade de cada objeto; tweens
+--	concorrentes sao mesclados (as propriedades nao sobrescritas terminam
+--	normalmente, nada fica pela metade)
+--  * pedido identico ao que ja esta rodando / ja no valor final = no-op
+--  * objeto invisivel (ou janela minimizada) = atribuicao direta, sem tween
+-- Nenhuma logica critica deve depender de Tween.Completed.
+-- ===================================================================
+local STUB_TWEEN = {}
+STUB_TWEEN.Completed = { Connect = function(_, callback)
+	task.defer(callback, Enum.PlaybackState.Completed)
+	return { Disconnect = function() end }
+end }
+function STUB_TWEEN:Cancel() end
+function STUB_TWEEN:Play() end
+local function instantTween() return STUB_TWEEN end
+
+local InfoCache = {}
+local function getTweenInfo(duration, style, direction)
+	style = style or Enum.EasingStyle.Quint
+	direction = direction or Enum.EasingDirection.Out
+	local byStyle = InfoCache[style]
+	if not byStyle then byStyle = {}; InfoCache[style] = byStyle end
+	local byDirection = byStyle[direction]
+	if not byDirection then byDirection = {}; byStyle[direction] = byDirection end
+	local info = byDirection[duration]
+	if not info then
+		info = TweenInfo.new(duration, style, direction)
+		byDirection[duration] = info
+	end
+	return info
+end
+
+local GuiClassCache = {}
+local function isGuiClass(instance)
+	local className = instance.ClassName
+	local cached = GuiClassCache[className]
+	if cached == nil then
+		cached = instance:IsA("GuiObject")
+		GuiClassCache[className] = cached
+	end
+	return cached
+end
+
+-- Esta sendo desenhado de fato? (todo ancestral GuiObject visivel + ScreenGui ligada)
+local function isRendered(instance)
+	local node = instance
+	if not isGuiClass(node) then node = node.Parent end
+	while node do
+		if isGuiClass(node) then
+			if not node.Visible then return false end
+		elseif node:IsA("LayerCollector") then
+			return node.Enabled
+		end
+		node = node.Parent
+	end
+	return true
+end
+
+local ActiveTweens = setmetatable({}, { __mode = "k" })
+
+local function isRunning(record)
+	local state = record.Tween.PlaybackState
+	return state ~= Enum.PlaybackState.Completed and state ~= Enum.PlaybackState.Cancelled
+end
+
+-- Cancela tweens que disputam as propriedades pedidas e devolve as
+-- propriedades "orfas" (do tween cancelado) para o novo tween terminar.
+local function takeConflicts(object, properties)
+	local records = ActiveTweens[object]
+	if not records then return nil, nil end
+	local leftovers
+	for property in pairs(properties) do
+		local record = records[property]
+		if record then
+			records[property] = nil
+			if isRunning(record) then
+				record.Tween:Cancel()
+				for other, goal in pairs(record.Goals) do
+					if records[other] == record then records[other] = nil end
+					if properties[other] == nil then
+						leftovers = leftovers or {}
+						leftovers[other] = goal
+					end
+				end
+			end
+		end
+	end
+	return leftovers, records
+end
+
+local function sameValue(a, b)
+	if a == b then return true end
+	if type(a) == "number" and type(b) == "number" then return math.abs(a - b) < 1e-4 end
+	return false
+end
+
+local function cancelTweensUnder(root)
+	for object, records in pairs(ActiveTweens) do
+		if object == root or object:IsDescendantOf(root) then
+			for _, record in pairs(records) do
+				if isRunning(record) then record.Tween:Cancel() end
+			end
+			ActiveTweens[object] = nil
+		end
+	end
 end
 
 local function tween(object, duration, properties, style, direction)
-	if State.LowPerformance then
+	if State.LowPerformance or not duration or duration <= 0 or not isRendered(object) then
+		local leftovers = takeConflicts(object, properties)
+		if leftovers then for key, value in pairs(leftovers) do object[key] = value end end
 		for key, value in pairs(properties) do object[key] = value end
-		return instantTween()
+		return STUB_TWEEN
 	end
-	local info = TweenInfo.new(duration, style or Enum.EasingStyle.Quint, direction or Enum.EasingDirection.Out)
-	local t = TweenService:Create(object, info, properties)
+
+	-- Pedido redundante: ja esta indo / ja esta no valor final.
+	local records = ActiveTweens[object]
+	local same, running = true, nil
+	for key, goal in pairs(properties) do
+		local record = records and records[key]
+		if record and isRunning(record) then
+			if not sameValue(record.Goals[key], goal) then same = false; break end
+			running = running or record
+		elseif not sameValue(object[key], goal) then
+			same = false; break
+		end
+	end
+	if same then return running and running.Tween or STUB_TWEEN end
+
+	local leftovers
+	leftovers, records = takeConflicts(object, properties)
+	local goals = properties
+	if leftovers then
+		goals = table.clone(properties)
+		for key, value in pairs(leftovers) do goals[key] = value end
+	end
+	local t = TweenService:Create(object, getTweenInfo(duration, style, direction), goals)
+	local record = { Tween = t, Goals = goals }
+	if not records then records = {}; ActiveTweens[object] = records end
+	for key in pairs(goals) do records[key] = record end
 	t:Play()
 	return t
 end
@@ -213,19 +355,36 @@ local function attachShadow(target, parent, corner, scaleObject, connections)
 		addCorner(layer, corner + spec.Grow)
 		table.insert(layers, { Frame = layer, Alpha = spec.Alpha })
 	end
+	local lastGroup = nil
 	local function sync()
+		local visible = target.Visible and not State.LowPerformance
+		if container.Visible ~= visible then container.Visible = visible end
+		if not visible then return end
 		local position = target.Position
 		container.Position = UDim2.new(position.X.Scale, position.X.Offset, position.Y.Scale, position.Y.Offset + 6)
 		container.Size = target.Size
-		container.Visible = target.Visible and not State.LowPerformance
 		if containerScale then containerScale.Scale = scaleObject.Scale end
 		local groupTransparency = target.GroupTransparency
-		for _, layer in ipairs(layers) do
-			layer.Frame.BackgroundTransparency = 1 - (1 - layer.Alpha) * (1 - groupTransparency)
+		if groupTransparency ~= lastGroup then
+			lastGroup = groupTransparency
+			for _, layer in ipairs(layers) do
+				layer.Frame.BackgroundTransparency = 1 - (1 - layer.Alpha) * (1 - groupTransparency)
+			end
 		end
 	end
+	-- Posicao/tamanho/transparencia/escala mudam juntos num tween: coalesce
+	-- em uma unica atualizacao por frame.
+	local pending = false
+	local function schedule()
+		if pending then return end
+		pending = true
+		task.defer(function()
+			pending = false
+			sync()
+		end)
+	end
 	local function watch(instance, property)
-		local c = instance:GetPropertyChangedSignal(property):Connect(sync)
+		local c = instance:GetPropertyChangedSignal(property):Connect(schedule)
 		if connections then table.insert(connections, c) end
 	end
 	watch(target, "Position"); watch(target, "Size")
@@ -386,15 +545,16 @@ local function makeDraggable(handle, target, connections, options)
 	local startPointer = Vector2.zero
 	local startPosition = target.Position
 	local didMoveThreshold = options.Threshold or 4
+	local moveConn, endConn
 
-	table.insert(connections, handle.InputBegan:Connect(function(input)
-		if dragging or not isPointer(input) then return end
-		dragging = true; moved = false; activeInput = input
-		startPointer = Vector2.new(input.Position.X, input.Position.Y)
-		startPosition = target.Position
-	end))
+	-- InputChanged/InputEnded globais so existem durante o gesto.
+	local function release()
+		if moveConn then moveConn:Disconnect(); moveConn = nil end
+		if endConn then endConn:Disconnect(); endConn = nil end
+		dragging = false; activeInput = nil
+	end
 
-	table.insert(connections, UserInputService.InputChanged:Connect(function(input)
+	local function onMove(input)
 		if not dragging then return end
 		local isMove = input.UserInputType == Enum.UserInputType.MouseMovement
 			or (input.UserInputType == Enum.UserInputType.Touch and input == activeInput)
@@ -406,18 +566,34 @@ local function makeDraggable(handle, target, connections, options)
 			startPosition.Y.Scale, startPosition.Y.Offset + delta.Y)
 		if options.Clamp then newPosition = options.Clamp(newPosition) end
 		target.Position = newPosition
-	end))
+	end
 
-	table.insert(connections, UserInputService.InputEnded:Connect(function(input)
+	local function onEnd(input)
 		if not dragging or not activeInput then return end
 		local same = input == activeInput or (input.UserInputType == Enum.UserInputType.MouseButton1
 			and activeInput.UserInputType == Enum.UserInputType.MouseButton1)
 		if not same then return end
-		dragging = false; activeInput = nil
-		if moved then
+		local wasMoved = moved
+		release()
+		if wasMoved then
 			if options.OnDragEnd then options.OnDragEnd() end
 		elseif options.OnClick then options.OnClick() end
+	end
+
+	table.insert(connections, handle.InputBegan:Connect(function(input)
+		if not isPointer(input) then return end
+		if dragging then
+			-- gesto anterior perdido (elemento ocultado no meio do toque): libera
+			if activeInput and activeInput.UserInputState ~= Enum.UserInputState.End then return end
+			release()
+		end
+		dragging = true; moved = false; activeInput = input
+		startPointer = Vector2.new(input.Position.X, input.Position.Y)
+		startPosition = target.Position
+		moveConn = UserInputService.InputChanged:Connect(onMove)
+		endConn = UserInputService.InputEnded:Connect(onEnd)
 	end))
+	table.insert(connections, { Disconnect = release })
 end
 
 -- Icones (inalterado)
@@ -1258,7 +1434,8 @@ function Tab:AddButton(config)
 	end)
 	button.Activated:Connect(function()
 		local flash = tween(stroke, Anim.Micro, { Color = accentLight(), Transparency = 0.05 })
-		flash.Completed:Connect(function()
+		flash.Completed:Connect(function(playbackState)
+			if playbackState ~= Enum.PlaybackState.Completed then return end
 			tween(stroke, Anim.Normal, hovering
 				and { Color = accent(), Transparency = 0.55 }
 				or { Color = Theme.StrokeSoft, Transparency = 0.35 })
@@ -1455,12 +1632,18 @@ function Tab:AddToggle(config)
 	row.MouseButton1Down:Connect(function()
 		tween(rowScale, Anim.Micro, { Scale = 0.99 })
 		local ks = m.SwitchH - 8
-		tween(knob, Anim.Micro, { Size = UDim2.fromOffset(ks + 4, ks) })
+		-- knob estica no toque; se ligado, compensa a posicao para nao vazar da pilula
+		tween(knob, Anim.Micro, {
+			Size = UDim2.fromOffset(ks + 4, ks),
+			Position = state and UDim2.new(1, -(ks + 8), 0.5, 0) or UDim2.new(0, 4, 0.5, 0),
+		})
+		tween(glow, Anim.Fast, { BackgroundTransparency = state and 0.7 or 0.9 })
 	end)
 	row.MouseButton1Up:Connect(function()
 		tween(rowScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
 		local ks = m.SwitchH - 8
-		tween(knob, Anim.Spring, { Size = UDim2.fromOffset(ks, ks) }, Enum.EasingStyle.Back)
+		tween(knob, Anim.Spring, { Size = UDim2.fromOffset(ks, ks), Position = knobPosition() }, Enum.EasingStyle.Back)
+		tween(glow, Anim.Normal, { BackgroundTransparency = state and 0.82 or 1 })
 	end)
 	row.MouseLeave:Connect(knobRest)
 	row.Activated:Connect(function() object:Set(not state) end)
@@ -1557,12 +1740,13 @@ function Tab:AddSlider(config)
 		Size = UDim2.new(1, 0, 0, 34), Text = "",
 		AutoButtonColor = false, ZIndex = 3, Parent = holder,
 	})
+	local dragging = false
 	local function render(animate)
 		local alpha = 0
 		if max > min then alpha = (value - min) / (max - min) end
 		local text = tostring(value) .. suffix
 		if valueLabel.Text ~= text then valueLabel.Text = text end
-		if animate then
+		if animate and not dragging then
 			tween(fill, Anim.Micro, { Size = UDim2.new(alpha, 0, 1, 0) }, Enum.EasingStyle.Linear)
 			tween(knob, Anim.Micro, { Position = UDim2.new(alpha, 0, 0.5, 0) }, Enum.EasingStyle.Linear)
 		else
@@ -1570,7 +1754,6 @@ function Tab:AddSlider(config)
 			knob.Position = UDim2.new(alpha, 0, 0.5, 0)
 		end
 	end
-	local dragging = false
 	win:_onLayout(function()
 		holder.Size = UDim2.new(1, 0, 0, m.Row + 14)
 		nameLabel.TextSize = m.Text
@@ -1623,19 +1806,30 @@ function Tab:AddSlider(config)
 		tween(knobHalo, Anim.Fast, { Transparency = 1 })
 		tween(valueLabel, Anim.Fast, { TextColor3 = Theme.SubText })
 	end
+	local moveConn, endConn
+	local function untrack()
+		if moveConn then moveConn:Disconnect(); moveConn = nil end
+		if endConn then endConn:Disconnect(); endConn = nil end
+	end
+	table.insert(self._connections, { Disconnect = untrack })
 	hit.InputBegan:Connect(function(input)
-		if dragging or not isPointer(input) then return end
+		if not isPointer(input) then return end
+		if dragging then return end
 		startDragging(); updateFromInput(input)
+		untrack()
+		moveConn = UserInputService.InputChanged:Connect(function(changed)
+			if changed.UserInputType == Enum.UserInputType.MouseMovement
+				or changed.UserInputType == Enum.UserInputType.Touch then
+				updateFromInput(changed)
+			end
+		end)
+		endConn = UserInputService.InputEnded:Connect(function(ended)
+			if isPointer(ended) then
+				untrack()
+				stopDragging()
+			end
+		end)
 	end)
-	table.insert(self._connections, UserInputService.InputChanged:Connect(function(input)
-		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-			or input.UserInputType == Enum.UserInputType.Touch) then
-			updateFromInput(input)
-		end
-	end))
-	table.insert(self._connections, UserInputService.InputEnded:Connect(function(input)
-		if dragging and isPointer(input) then stopDragging() end
-	end))
 	return object
 end
 
@@ -2418,13 +2612,34 @@ function Tab:AddColorPicker(config)
 		paintUI()
 		safeCall(config.Callback, current)
 	end
+	local dragMoveConn, dragEndConn
+	local function untrackDrag()
+		if dragMoveConn then dragMoveConn:Disconnect(); dragMoveConn = nil end
+		if dragEndConn then dragEndConn:Disconnect(); dragEndConn = nil end
+	end
+	local endDrag
 	local function beginDrag(kind, input)
 		if dragging then return end
 		dragging = kind; activeInput = input
 		self._page.ScrollingEnabled = false
 		updateDrag(input)
+		untrackDrag()
+		dragMoveConn = UserInputService.InputChanged:Connect(function(changed)
+			if not dragging then return end
+			if changed.UserInputType == Enum.UserInputType.MouseMovement
+				or (changed.UserInputType == Enum.UserInputType.Touch and changed == activeInput) then
+				updateDrag(changed)
+			end
+		end)
+		dragEndConn = UserInputService.InputEnded:Connect(function(ended)
+			if not dragging or not activeInput then return end
+			local same = ended == activeInput or (ended.UserInputType == Enum.UserInputType.MouseButton1
+				and activeInput.UserInputType == Enum.UserInputType.MouseButton1)
+			if same then endDrag() end
+		end)
 	end
-	local function endDrag()
+	function endDrag()
+		untrackDrag()
 		if not dragging then return end
 		dragging = nil; activeInput = nil
 		self._page.ScrollingEnabled = true
@@ -2435,19 +2650,7 @@ function Tab:AddColorPicker(config)
 	hueHit.InputBegan:Connect(function(input)
 		if isPointer(input) then beginDrag("hue", input) end
 	end)
-	table.insert(self._connections, UserInputService.InputChanged:Connect(function(input)
-		if not dragging then return end
-		if input.UserInputType == Enum.UserInputType.MouseMovement
-			or (input.UserInputType == Enum.UserInputType.Touch and input == activeInput) then
-			updateDrag(input)
-		end
-	end))
-	table.insert(self._connections, UserInputService.InputEnded:Connect(function(input)
-		if not dragging or not activeInput then return end
-		local same = input == activeInput or (input.UserInputType == Enum.UserInputType.MouseButton1
-			and activeInput.UserInputType == Enum.UserInputType.MouseButton1)
-		if same then endDrag() end
-	end))
+	table.insert(self._connections, { Disconnect = untrackDrag })
 
 	-- Campo HEX
 	hexBox.Focused:Connect(function()
@@ -2837,6 +3040,7 @@ function Window:_applyPerformance()
 		)
 		self._pulse:Play()
 	end
+	self:_refreshActivity()
 	self:_syncSettings()
 end
 
@@ -3335,6 +3539,10 @@ function Window:_applyStarsMode(animate)
 	end
 	self._starsUntil = os.clock() + 1
 	self:_syncStars()
+	self:_refreshActivity()
+	task.delay(1.05, function()
+		if self._state ~= "Destroyed" then self:_refreshActivity() end
+	end)
 	for _, widgets in pairs(self._favWidgets) do
 		for _, widget in ipairs(widgets) do
 			if not widget.NoAutoShow then widget.Show(on, animate) end
@@ -3744,35 +3952,93 @@ function Window:_showBall()
 	self._pulse:Play()
 end
 
+-- Estado + atividade. Toda mudanca de estado passa por aqui para que os
+-- Heartbeats (luas/estrelas) liguem e desliguem junto com a visibilidade.
+function Window:_setState(state)
+	if self._state == "Destroyed" and state ~= "Destroyed" then return end
+	self._state = state
+	self:_refreshActivity()
+end
+
+function Window:_refreshActivity()
+	local state = self._state
+	local shown = state == "Opening" or state == "Open" or state == "Restoring" or state == "Minimizing"
+	local root, gui = self._root, self._gui
+	if shown and root and not root.Visible then shown = false end
+	if shown and gui and not gui.Enabled then shown = false end
+	if self._setMoonsRunning then
+		self._setMoonsRunning(shown and not State.LowPerformance)
+	end
+	if self._setStarsRunning then
+		self._setStarsRunning(shown and (self._starsOn == true or os.clock() < (self._starsUntil or 0)))
+	end
+end
+
+-- Minimizar/Restaurar: maquina de estados por TOKEN + timers. Nao depende de
+-- Tween.Completed (era cancelado por tweens concorrentes e deixava o estado
+-- preso em "Minimizing"/"Restoring", impedindo a bolinha de reabrir).
+-- Pode ser interrompida a qualquer momento (tocar na bolinha durante a
+-- animacao reverte); nunca fica travada.
 function Window:Minimize()
-	if self._state ~= "Open" and self._state ~= "Opening" then return end
-	self._state = "Minimizing"
+	local state = self._state
+	if state ~= "Open" and state ~= "Opening" and state ~= "Restoring" then return end
 	local root = self._root
-	self._restorePosition = root.Position
+	self._transition = (self._transition or 0) + 1
+	local token = self._transition
+	if state ~= "Restoring" or not self._restorePosition then
+		self._restorePosition = root.Position
+	end
+	self:_setState("Minimizing")
+	self:_closeDropdowns()
 	if self._dockActive then self._ball.Position = self:_dockCenter() end
 	local duration = Anim.Normal + 0.1
 	tween(root, duration, {
 		Position = self._ball.Position, GroupTransparency = 1,
 	}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-	local t = tween(self._scale, duration, { Scale = 0.1 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-	t.Completed:Connect(function(playbackState)
-		if playbackState ~= Enum.PlaybackState.Completed or self._state ~= "Minimizing" then return end
+	tween(self._scale, duration, { Scale = 0.1 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+
+	local function finish()
+		if self._transition ~= token or self._state ~= "Minimizing" then return end
 		root.Visible = false
-		self._state = "Minimized"
+		self:_setState("Minimized")
 		self:_showBall()
-	end)
+	end
+	if State.LowPerformance then finish() else task.delay(duration + 0.04, finish) end
 end
 
 function Window:Restore()
-	if self._state ~= "Minimized" then return end
-	self._state = "Restoring"
+	local state = self._state
+	if state ~= "Minimized" and state ~= "Minimizing" then return end
+	self._transition = (self._transition or 0) + 1
+	local token = self._transition
 	local root = self._root
+	if self._pulse then self._pulse:Cancel(); self._pulse = nil end
+
+	local function settle()
+		if self._transition ~= token or self._state ~= "Restoring" then return end
+		self:_setState("Open")
+	end
+
+	if state == "Minimizing" then
+		-- minimizacao em andamento: o painel ainda esta visivel, so reverte
+		self:_setState("Restoring")
+		local size = self:_getSize()
+		tween(root, Anim.Slow, {
+			Position = clampWindowPosition(self._restorePosition or root.Position, size),
+			GroupTransparency = 0,
+		})
+		tween(self._scale, Anim.Slow, { Scale = 1 })
+		task.delay(Anim.Slow + 0.05, settle)
+		return
+	end
+
+	self:_setState("Restoring")
 	if self._dockActive then self._ball.Position = self:_dockCenter() end
 	local ballPosition = self._ball.Position
-	if self._pulse then self._pulse:Cancel(); self._pulse = nil end
-	local t = tween(self._ballScale, Anim.Fast, { Scale = 0 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-	t.Completed:Connect(function(playbackState)
-		if playbackState ~= Enum.PlaybackState.Completed or self._state ~= "Restoring" then return end
+	tween(self._ballScale, Anim.Fast, { Scale = 0 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+
+	local function expand()
+		if self._transition ~= token or self._state ~= "Restoring" then return end
 		self._ball.Visible = false
 		local size = self:_getSize()
 		root.Size = size
@@ -3780,17 +4046,15 @@ function Window:Restore()
 		root.GroupTransparency = 1
 		self._scale.Scale = 0.1
 		root.Visible = true
+		self:_refreshActivity()
 		self:_applyLayout(false)
 		tween(root, Anim.Slow, {
-			Position = clampWindowPosition(self._restorePosition, size), GroupTransparency = 0,
+			Position = clampWindowPosition(self._restorePosition or ballPosition, size), GroupTransparency = 0,
 		})
-		local t2 = tween(self._scale, Anim.Slow, { Scale = 1 })
-		t2.Completed:Connect(function(state2)
-			if state2 == Enum.PlaybackState.Completed and self._state == "Restoring" then
-				self._state = "Open"
-			end
-		end)
-	end)
+		tween(self._scale, Anim.Slow, { Scale = 1 })
+		task.delay(Anim.Slow + 0.05, settle)
+	end
+	if State.LowPerformance then expand() else task.delay(Anim.Fast + 0.03, expand) end
 end
 
 ----------------------------------------------------------------
@@ -3952,12 +4216,13 @@ function Window:Close(skipConfirm)
 		return
 	end
 	local wasHidden = not self._root.Visible
-	self._state = "Closing"
+	self._transition = (self._transition or 0) + 1
+	self:_setState("Closing")
 	safeCall(self._onClose)
 	if wasHidden then self:Destroy(); return end
 	tween(self._root, Anim.Normal, { GroupTransparency = 1 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-	local t = tween(self._scale, Anim.Normal, { Scale = 0.94 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-	t.Completed:Connect(function() self:Destroy() end)
+	tween(self._scale, Anim.Normal, { Scale = 0.94 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	if State.LowPerformance then self:Destroy() else task.delay(Anim.Normal + 0.03, function() self:Destroy() end) end
 end
 
 function Window:Destroy()
@@ -3971,7 +4236,10 @@ function Window:Destroy()
 	if self._cameraConnection then self._cameraConnection:Disconnect(); self._cameraConnection = nil end
 	if self._pulse then self._pulse:Cancel(); self._pulse = nil end
 	if self._confirmLayer then self._confirmLayer:Destroy(); self._confirmLayer = nil end
-	if self._gui then self._gui:Destroy() end
+	if self._gui then
+		cancelTweensUnder(self._gui)
+		self._gui:Destroy()
+	end
 end
 
 function Window:_onViewportChanged()
@@ -4044,9 +4312,13 @@ function Window:_dockReclamp()
 end
 
 function Window:_dockToggleWindow()
-	if self._state == "Minimized" then
+	local now = os.clock()
+	if now - (self._lastToggle or 0) < 0.18 then return end -- anti toque duplo
+	self._lastToggle = now
+	local state = self._state
+	if state == "Minimized" or state == "Minimizing" then
 		self:Restore()
-	elseif self._state == "Open" or self._state == "Opening" then
+	elseif state == "Open" or state == "Opening" or state == "Restoring" then
 		self:Minimize()
 	end
 end
@@ -4126,7 +4398,7 @@ function Window:_buildDock(config)
 	end
 
 	local function requireOpen()
-		if self._state == "Minimized" then
+		if self._state == "Minimized" or self._state == "Minimizing" then
 			self:Restore()
 			return false
 		end
@@ -4267,12 +4539,19 @@ function Window:_buildDock(config)
 		tween(sphereScale, Anim.Fast, { Scale = 1 }, Enum.EasingStyle.Back)
 	end
 
+	local onDockMoved, onDockEnded, trackDock, untrackDock
+
 	local function onBegan(input)
-		if dragging or not isPointer(input) then return end
+		if not isPointer(input) then return end
+		if dragging then
+			if activeInput and activeInput.UserInputState ~= Enum.UserInputState.End then return end
+			untrackDock()
+		end
 		dragging = true
 		moved = false
 		holdFired = false
 		activeInput = input
+		trackDock()
 		startPointer = Vector2.new(input.Position.X, input.Position.Y)
 		startPosition = dock.Position
 		setPressed(findSlot(pointerPosition(input)))
@@ -4302,7 +4581,7 @@ function Window:_buildDock(config)
 		if not dragging then tween(sphereScale, Anim.Fast, { Scale = 1 }) end
 	end)
 
-	table.insert(self._connections, UserInputService.InputChanged:Connect(function(input)
+	function onDockMoved(input)
 		if not dragging or holdFired then return end
 		local isMove = input.UserInputType == Enum.UserInputType.MouseMovement
 			or (input.UserInputType == Enum.UserInputType.Touch and input == activeInput)
@@ -4319,13 +4598,14 @@ function Window:_buildDock(config)
 			startPosition.Y.Scale, startPosition.Y.Offset + delta.Y
 		)
 		dock.Position = self:_dockClamp(nextPosition, pillShown)
-	end))
+	end
 
-	table.insert(self._connections, UserInputService.InputEnded:Connect(function(input)
+	function onDockEnded(input)
 		if not dragging or not activeInput then return end
 		local same = input == activeInput or (input.UserInputType == Enum.UserInputType.MouseButton1
 			and activeInput.UserInputType == Enum.UserInputType.MouseButton1)
 		if not same then return end
+		untrackDock()
 		dragging = false
 		activeInput = nil
 		local wasMoved, wasHold = moved, holdFired
@@ -4345,7 +4625,19 @@ function Window:_buildDock(config)
 		end
 		local hit = findSlot(point)
 		if hit and hit == slot then safeCall(hit.Action) end
-	end))
+	end
+
+	local dockMoveConn, dockEndConn
+	function untrackDock()
+		if dockMoveConn then dockMoveConn:Disconnect(); dockMoveConn = nil end
+		if dockEndConn then dockEndConn:Disconnect(); dockEndConn = nil end
+	end
+	function trackDock()
+		untrackDock()
+		dockMoveConn = UserInputService.InputChanged:Connect(onDockMoved)
+		dockEndConn = UserInputService.InputEnded:Connect(onDockEnded)
+	end
+	table.insert(self._connections, { Disconnect = untrackDock })
 
 	self:_onAccent(function(animate)
 		sphereIcon.ImageColor3 = accentLight()
@@ -4485,20 +4777,46 @@ function AetherUI.CreateWindow(config)
 		})
 	end
 	self._moons = moons
-	local moonTime = 0
-	table.insert(self._connections, RunService.Heartbeat:Connect(function(dt)
-		if State.LowPerformance or not gui.Enabled or not root.Visible then return end
-		moonTime += dt
-		for _, moon in ipairs(moons) do
-			local y = (moon.Phase + moonTime * moon.Speed) % 1
-			local fade = math.clamp(math.min(y, 1 - y) * 7, 0, 1)
-			moon.Image.Position = UDim2.new(
-				moon.X + math.sin(moonTime * moon.SwayRate + moon.Phase * 6.28) * moon.Sway, 0,
-				y, -moon.Size * (1 - y)
-			)
-			moon.Image.ImageTransparency = 1 - (1 - moon.Base) * fade
+	-- Luas: Heartbeat SO existe com a janela visivel (desconecta ao minimizar /
+	-- ocultar / modo baixo desempenho). 30 Hz (20 Hz se o FPS cair): o
+	-- movimento e lento (< 1 px por passo), entao continua fluido e gasta
+	-- metade do processamento. Propriedades so sao reescritas se mudaram.
+	local moonTime, moonAccum, smoothDt = 0, 0, 1 / 60
+	local moonConn
+	self._setMoonsRunning = function(run)
+		if run then
+			if moonConn then return end
+			moonAccum = 0
+			moonConn = RunService.Heartbeat:Connect(function(dt)
+				smoothDt = smoothDt * 0.92 + dt * 0.08
+				moonAccum += dt
+				if moonAccum < (smoothDt > 0.026 and 0.05 or 0.0333) then return end
+				moonTime += moonAccum
+				moonAccum = 0
+				for _, moon in ipairs(moons) do
+					local y = (moon.Phase + moonTime * moon.Speed) % 1
+					local fade = math.clamp(math.min(y, 1 - y) * 7, 0, 1)
+					local image = moon.Image
+					if fade <= 0 then
+						if moon.LastT ~= 1 then image.ImageTransparency = 1; moon.LastT = 1 end
+					else
+						image.Position = UDim2.new(
+							moon.X + math.sin(moonTime * moon.SwayRate + moon.Phase * 6.28) * moon.Sway, 0,
+							y, -moon.Size * (1 - y)
+						)
+						local transparency = 1 - (1 - moon.Base) * fade
+						if math.abs(transparency - (moon.LastT or 2)) > 0.012 then
+							image.ImageTransparency = transparency
+							moon.LastT = transparency
+						end
+					end
+				end
+			end)
+		elseif moonConn then
+			moonConn:Disconnect(); moonConn = nil
 		end
-	end))
+	end
+	table.insert(self._connections, { Disconnect = function() self._setMoonsRunning(false) end })
 
 	local glassSheen = create("Frame", {
 		Name = "GlassSheen", BackgroundColor3 = Theme.White,
@@ -4877,9 +5195,23 @@ function AetherUI.CreateWindow(config)
 	if config.Dock ~= false then self:_buildDock(config) end
 
 	-- Reposiciona as estrelas dos componentes (rolagem, expansao, resize).
-	table.insert(self._connections, RunService.Heartbeat:Connect(function()
-		if self._state == "Destroyed" then return end
-		if self._starsOn or os.clock() < (self._starsUntil or 0) then self:_syncStars() end
+	-- Estrelas: Heartbeat so existe enquanto o modo estrela esta ativo (ou na
+	-- janela de 1 s das transicoes) E a janela esta visivel.
+	local starsConn
+	self._setStarsRunning = function(run)
+		if run then
+			if starsConn then return end
+			starsConn = RunService.Heartbeat:Connect(function()
+				if self._state == "Destroyed" then return end
+				self:_syncStars()
+			end)
+		elseif starsConn then
+			starsConn:Disconnect(); starsConn = nil
+		end
+	end
+	table.insert(self._connections, { Disconnect = function() self._setStarsRunning(false) end })
+	table.insert(self._connections, gui:GetPropertyChangedSignal("Enabled"):Connect(function()
+		self:_refreshActivity()
 	end))
 
 	self:_bindCamera()
@@ -4892,12 +5224,11 @@ function AetherUI.CreateWindow(config)
 	root.GroupTransparency = 1
 	rootScale.Scale = 0.85
 	local openTween = tween(root, Anim.Slow + 0.1, { GroupTransparency = 0 }, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-	local openScale = tween(rootScale, Anim.Slow + 0.15, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-	openScale.Completed:Connect(function(playbackState)
-		if playbackState == Enum.PlaybackState.Completed and self._state == "Opening" then
-			self._state = "Open"
-		end
+	tween(rootScale, Anim.Slow + 0.15, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+	task.delay(Anim.Slow + 0.2, function()
+		if self._state == "Opening" then self:_setState("Open") end
 	end)
+	self:_refreshActivity()
 
 	return self
 end
@@ -4921,7 +5252,7 @@ end
 -- Se o parametro novo e o antigo forem informados, o novo tem prioridade.
 -- Parametros exclusivos da Rayfield (LoadingTitle, ConfigurationSaving,
 -- KeySystem, Theme...) sao ignorados.
----------------------------------------------------------------
+----------------------------------------------------------------
 AetherUI.Flags = {}
 
 local function copyConfig(config)
