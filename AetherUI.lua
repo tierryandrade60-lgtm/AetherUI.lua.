@@ -3328,8 +3328,9 @@ function Tab:_applyMetrics()
 	self._label.Position = UDim2.fromOffset(m.SideRow, 0)
 	self:_applyLabelWidth(false)
 	if self._icon then
-		self._icon:SetSize(m.Icon)
-		self._icon.Instance.Position = UDim2.new(0, math.floor((m.SideRow - m.Icon) / 2), 0.5, 0)
+		local iconPx = iconSizeOf(self._icon, m.Icon)
+		self._icon:SetSize(iconPx)
+		self._icon.Instance.Position = UDim2.new(0, math.floor((m.SideRow - iconPx) / 2), 0.5, 0)
 	end
 	self._pagePadding.PaddingLeft = UDim.new(0, m.Pad)
 	self._pagePadding.PaddingTop = UDim.new(0, m.Pad)
@@ -3382,14 +3383,14 @@ function Tab:_paint(animate)
 	if animate then
 		tween(self._button, Anim.Fast, { BackgroundTransparency = backgroundTransparency })
 		tween(self._label, Anim.Normal, { TextColor3 = textColor })
-		if self._icon then self._icon:Tween(iconColor, Anim.Normal) end
+		if self._icon and not self._icon.CustomColor then self._icon:Tween(iconColor, Anim.Normal) end
 		if self._scaleObj and not self._pressed then
 			tween(self._scaleObj, Anim.Smooth, { Scale = self:_restScale() })
 		end
 	else
 		self._button.BackgroundTransparency = backgroundTransparency
 		self._label.TextColor3 = textColor
-		if self._icon then self._icon:SetColor(iconColor) end
+		if self._icon and not self._icon.CustomColor then self._icon:SetColor(iconColor) end
 		if self._scaleObj then self._scaleObj.Scale = self:_restScale() end
 	end
 end
@@ -3713,6 +3714,7 @@ local KindInfo = {
 	Slider = { Label = "Slider", Words = "slider controle deslizante barra valor ajuste" },
 	Dropdown = { Label = "Dropdown", Words = "dropdown lista menu selecao selecionar escolher" },
 	MultiDropdown = { Label = "Multi", Words = "multi multidropdown dropdown lista multipla selecao varios" },
+	RadioGroup = { Label = "Radio", Words = "radio grupo group selecao unica opcao escolher" },
 	ColorPicker = { Label = "Cor", Words = "cor color picker seletor paleta tema" },
 	Option = { Label = "Opcao", Words = "opcao option item" },
 }
@@ -3975,7 +3977,7 @@ end
 local KindIcons = {
 	Tab = "grid", Section = "list", Label = "info", Button = "target",
 	Toggle = "check", Slider = "gauge", Dropdown = "dropdown",
-	MultiDropdown = "list", ColorPicker = "palette",
+	MultiDropdown = "list", RadioGroup = "radio", ColorPicker = "palette",
 }
 
 function Window:_makeFavKey(tab, kind, name)
@@ -4319,7 +4321,7 @@ end
 ----------------------------------------------------------------
 -- Tab lateral (com hover + bounce)
 ----------------------------------------------------------------
-function Window:_createTab(label, iconSpec, isSettings, isFavorites)
+function Window:_createTab(label, iconSpec, isSettings, isFavorites, iconOpts)
 	local m = self._metrics
 	if iconSpec == nil then iconSpec = guessIcon(label) end
 	local button = create("TextButton", {
@@ -4334,10 +4336,11 @@ function Window:_createTab(label, iconSpec, isSettings, isFavorites)
 		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 		Color = accent(), Thickness = 1, Transparency = 1, Parent = button,
 	})
-	local icon = createIcon(iconSpec, button, m.Icon, Theme.SubText)
+	local icon = createIcon(iconSpec, button, m.Icon, Theme.SubText, iconOpts)
 	if icon then
+		local iconPx = iconSizeOf(icon, m.Icon)
 		icon.Instance.AnchorPoint = Vector2.new(0, 0.5)
-		icon.Instance.Position = UDim2.new(0, math.floor((m.SideRow - m.Icon) / 2), 0.5, 0)
+		icon.Instance.Position = UDim2.new(0, math.floor((m.SideRow - iconPx) / 2), 0.5, 0)
 	end
 	local nameLabel = create("TextLabel", {
 		Name = "Label", BackgroundTransparency = 1,
@@ -4428,11 +4431,13 @@ function Window:_createTab(label, iconSpec, isSettings, isFavorites)
 end
 
 function Window:AddTab(name, icon)
+	local iconOpts = nil
 	if typeof(name) == "table" then
+		iconOpts = { Size = name.IconSize, Color = name.IconColor }
 		icon = name.Icon or icon
 		name = name.Name or name.Title
 	end
-	return self:_createTab(tostring(name or "Tab"), icon, false)
+	return self:_createTab(tostring(name or "Tab"), icon, false, false, iconOpts)
 end
 function Window:GetSettingsTab() return self._settingsTab end
 
@@ -4479,9 +4484,58 @@ function Window:_buildSettings()
 			AetherUI.SetLowPerformance(value)
 		end,
 	})
+	tab:AddSection({ Text = "Configuracoes", Icon = "save" })
+	local configStatus = tab:AddLabel({
+		Text = "Perfil: " .. tostring(self._configFolder or "AetherUI") .. "/" .. tostring(self._configFile or "default") .. ".json",
+		Icon = "file",
+	})
+	tab:AddButton({
+		Name = "Salvar configuracao", Icon = "save",
+		Callback = function()
+			local ok, info = self:SaveConfig()
+			if ok then
+				configStatus:SetText("Salvo: " .. tostring(info))
+				AetherUI.Notify({ Title = "Configuracao salva", Content = "Salvo em " .. tostring(info), Type = "success", Duration = 3 })
+			else
+				configStatus:SetText("JSON gerado (sem writefile)")
+				AetherUI.Notify({ Title = "Aviso de salvamento", Content = tostring(info), Type = "warning", Duration = 5 })
+			end
+		end,
+	})
+	tab:AddButton({
+		Name = "Carregar configuracao", Icon = "upload",
+		Callback = function()
+			local ok, info = self:LoadConfig()
+			if ok then
+				configStatus:SetText("Carregado: " .. tostring(info))
+				AetherUI.Notify({ Title = "Configuracao carregada", Content = "Valores restaurados.", Type = "success", Duration = 3 })
+			else
+				AetherUI.Notify({ Title = "Nao carregado", Content = tostring(info), Type = "warning", Duration = 4 })
+			end
+		end,
+	})
+	tab:AddButton({
+		Name = "Exportar configuracao (JSON)", Icon = "copy",
+		Callback = function()
+			local jsonText = self:ExportConfig(false)
+			local copied = false
+			local okClip = pcall(function()
+				local clipFn = (getgenv and getgenv().setclipboard) or setclipboard or toclipboard
+				if typeof(clipFn) == "function" then
+					clipFn(jsonText)
+					copied = true
+				end
+			end)
+			if okClip and copied then
+				AetherUI.Notify({ Title = "JSON copiado", Content = "Configuracao exportada para a area de transferencia.", Type = "success", Duration = 3 })
+			else
+				AetherUI.Notify({ Title = "JSON exportado", Content = "Gerados " .. tostring(#jsonText) .. " bytes via ExportConfig().", Type = "info", Duration = 3 })
+			end
+		end,
+	})
 	self._settingsControls = {
 		Compact = toggleCompact, Sidebar = toggleSidebar,
-		LowPerformance = toggleLow, SyncAccent = syncAccent,
+		LowPerformance = toggleLow, SyncAccent = syncAccent, ConfigStatus = configStatus,
 	}
 end
 
@@ -4515,9 +4569,309 @@ function Window:SetLowPerformance(value) AetherUI.SetLowPerformance(value) end
 function Window:GetLowPerformance() return State.LowPerformance end
 function Window:Notify(config) return AetherUI.Notify(config) end
 
+----------------------------------------------------------------
+-- Save Configuration (Export/Import JSON + Sistema de Arquivos)
+----------------------------------------------------------------
+local function sanitizeFileName(name)
+	local clean = tostring(name or "default"):gsub("[^%w%-%._]", "_")
+	if clean == "" then clean = "default" end
+	return clean
+end
+
+local function getFsApi()
+	local env = nil
+	if typeof(getgenv) == "function" then
+		local ok, res = pcall(getgenv)
+		if ok and typeof(res) == "table" then env = res end
+	end
+	local function resolveFn(name)
+		if env and typeof(env[name]) == "function" then return env[name] end
+		local ok, fn = pcall(function() return _G and _G[name] end)
+		if ok and typeof(fn) == "function" then return fn end
+		return nil
+	end
+	local writeFn = resolveFn("writefile")
+	local readFn = resolveFn("readfile")
+	local isFileFn = resolveFn("isfile")
+	if not writeFn or not readFn then return nil end
+	return {
+		writefile = writeFn,
+		readfile = readFn,
+		isfile = isFileFn,
+		isfolder = resolveFn("isfolder"),
+		makefolder = resolveFn("makefolder"),
+		listfiles = resolveFn("listfiles"),
+		delfile = resolveFn("delfile"),
+	}
+end
+
+local function serializeConfigValue(val)
+	if typeof(val) == "Color3" then
+		return {
+			__aetherType = "Color3",
+			R = math.round(val.R * 255),
+			G = math.round(val.G * 255),
+			B = math.round(val.B * 255),
+		}
+	end
+	if typeof(val) == "table" then
+		local out = {}
+		for k, v in pairs(val) do
+			out[k] = serializeConfigValue(v)
+		end
+		return out
+	end
+	if typeof(val) == "boolean" or typeof(val) == "number" or typeof(val) == "string" then
+		return val
+	end
+	return nil
+end
+
+local function deserializeConfigValue(val)
+	if typeof(val) == "table" then
+		if val.__aetherType == "Color3" and val.R ~= nil and val.G ~= nil and val.B ~= nil then
+			return Color3.fromRGB(tonumber(val.R) or 255, tonumber(val.G) or 255, tonumber(val.B) or 255)
+		end
+		local out = {}
+		for k, v in pairs(val) do
+			out[k] = deserializeConfigValue(v)
+		end
+		return out
+	end
+	return val
+end
+
+function Window:_resolveConfigPath(fileName)
+	local folder = sanitizeFileName(self._configFolder or self._guiName or "AetherUI")
+	local file = sanitizeFileName(fileName or self._configFile or "default")
+	if not string.find(string.lower(file), "%.json$") then
+		file = file .. ".json"
+	end
+	return folder, folder .. "/" .. file
+end
+
+function Window:ExportConfig(asTable)
+	local payload = {
+		Version = AetherUI.Version,
+		Meta = {
+			Accent = serializeConfigValue(State.Accent),
+			Compact = self._compact == true,
+			LowPerformance = State.LowPerformance == true,
+			Favorites = self:GetFavorites(),
+		},
+		Flags = {},
+	}
+	for flag, obj in pairs(self.Flags or {}) do
+		if typeof(obj.Get) == "function" then
+			local ok, value = pcall(function() return obj:Get() end)
+			if ok and value ~= nil and obj.Type ~= "Label" and obj.Type ~= "Section" and obj.Type ~= "Button" then
+				payload.Flags[tostring(flag)] = serializeConfigValue(value)
+			end
+		end
+	end
+	if asTable then return payload end
+	local ok, encoded = pcall(function() return HttpService:JSONEncode(payload) end)
+	if ok then return encoded end
+	return "{}"
+end
+
+function Window:ImportConfig(dataOrJson, silent)
+	local decoded = dataOrJson
+	if typeof(dataOrJson) == "string" then
+		local ok, res = pcall(function() return HttpService:JSONDecode(dataOrJson) end)
+		if not ok or typeof(res) ~= "table" then
+			return false, "JSON invalido ou corrompido."
+		end
+		decoded = res
+	end
+	if typeof(decoded) ~= "table" then
+		return false, "Formato de configuracao invalido."
+	end
+
+	local meta = decoded.Meta
+	if typeof(meta) == "table" then
+		if meta.Accent ~= nil then
+			local col = deserializeConfigValue(meta.Accent)
+			if typeof(col) == "Color3" then AetherUI.SetAccent(col) end
+		end
+		if typeof(meta.Compact) == "boolean" then self:SetCompact(meta.Compact) end
+		if typeof(meta.LowPerformance) == "boolean" then AetherUI.SetLowPerformance(meta.LowPerformance) end
+		if typeof(meta.Favorites) == "table" then self:SetFavorites(meta.Favorites) end
+	end
+
+	local flagsData = typeof(decoded.Flags) == "table" and decoded.Flags or decoded
+	local applied = 0
+	for flag, rawVal in pairs(flagsData) do
+		local obj = (self.Flags and self.Flags[flag]) or (AetherUI.Flags and AetherUI.Flags[flag])
+		if obj and typeof(obj.Set) == "function" then
+			local val = deserializeConfigValue(rawVal)
+			if val ~= nil then
+				pcall(function() obj:Set(val, silent == true) end)
+				applied = applied + 1
+			end
+		end
+	end
+	self._pendingConfigData = flagsData
+	return true, applied
+end
+
+function Window:SaveConfig(fileName)
+	local fs = getFsApi()
+	local json = self:ExportConfig(false)
+	if not fs then
+		return false, "Sistema de arquivos local (writefile/readfile) indisponivel neste ambiente; use ExportConfig()."
+	end
+	local folder, fullPath = self:_resolveConfigPath(fileName)
+	local ok, err = pcall(function()
+		if fs.isfolder and fs.makefolder then
+			local exists = fs.isfolder(folder)
+			if not exists then fs.makefolder(folder) end
+		elseif fs.makefolder then
+			pcall(fs.makefolder, folder)
+		end
+		fs.writefile(fullPath, json)
+	end)
+	if not ok then
+		return false, tostring(err)
+	end
+	return true, fullPath
+end
+
+function Window:LoadConfig(fileName, silent)
+	local fs = getFsApi()
+	if not fs then
+		return false, "Sistema de arquivos local (readfile) indisponivel neste ambiente; use ImportConfig()."
+	end
+	local _, fullPath = self:_resolveConfigPath(fileName)
+	local exists = true
+	if fs.isfile then
+		local okCheck, res = pcall(fs.isfile, fullPath)
+		if okCheck then exists = res == true end
+	end
+	if not exists then
+		return false, "Arquivo de configuracao nao encontrado: " .. fullPath
+	end
+	local okRead, content = pcall(fs.readfile, fullPath)
+	if not okRead or typeof(content) ~= "string" then
+		return false, "Falha ao ler arquivo: " .. tostring(content)
+	end
+	local okImport, detail = self:ImportConfig(content, silent)
+	if not okImport then return false, detail end
+	return true, fullPath
+end
+
+function Window:DeleteConfig(fileName)
+	local fs = getFsApi()
+	if not fs or not fs.delfile then
+		return false, "Funcao delfile indisponivel neste ambiente."
+	end
+	local _, fullPath = self:_resolveConfigPath(fileName)
+	if fs.isfile and not fs.isfile(fullPath) then
+		return false, "Arquivo nao existe: " .. fullPath
+	end
+	local ok, err = pcall(fs.delfile, fullPath)
+	if not ok then return false, tostring(err) end
+	return true, fullPath
+end
+
+function Window:ListConfigs()
+	local fs = getFsApi()
+	if not fs or not fs.listfiles then return {} end
+	local folder = sanitizeFileName(self._configFolder or self._guiName or "AetherUI")
+	if fs.isfolder and not fs.isfolder(folder) then return {} end
+	local ok, items = pcall(fs.listfiles, folder)
+	if not ok or typeof(items) ~= "table" then return {} end
+	local names = {}
+	for _, entry in ipairs(items) do
+		local base = tostring(entry):match("([^/\\]+)$") or tostring(entry)
+		local stripped = base:gsub("%.json$", "")
+		if stripped ~= "" then table.insert(names, stripped) end
+	end
+	return names
+end
+
+function Window:SaveConfiguration(fileName) return self:SaveConfig(fileName) end
+function Window:LoadConfiguration(fileName, silent) return self:LoadConfig(fileName, silent) end
+function Window:DeleteConfiguration(fileName) return self:DeleteConfig(fileName) end
+function Window:ListConfigurations() return self:ListConfigs() end
+
+function Window:_showDock(animate)
+	if not self._dock then return end
+	self._ball.Visible = false
+	self._dockShowToken = (self._dockShowToken or 0) + 1
+	self._dock.Position = self:_dockClamp(self._dock.Position, self._dockWide)
+	self._dock.Visible = true
+	if self._dockPulse then self._dockPulse:Cancel(); self._dockPulse = nil end
+	local showAnim = animate ~= false and not State.LowPerformance
+	if showAnim then
+		self._dockSphereScale.Scale = 0
+		tween(self._dockSphereScale, Anim.Normal + 0.06, { Scale = 1 }, Enum.EasingStyle.Back)
+		if self._dockPill then
+			if self._dockWide then
+				self._dockPill.Visible = true
+				self._dockPill.Active = true
+				self._dockPill.Size = UDim2.fromOffset(self._dockHeight, self._dockHeight)
+				self._dockPill.GroupTransparency = 1
+				local tok = self._dockShowToken
+				task.delay(0.12, function()
+					if self._state == "Destroyed" or self._dockShowToken ~= tok or not self._dockWide or not self._dock.Visible then return end
+					tween(self._dockPill, Anim.Slow, {
+						Size = UDim2.fromOffset(self._dockWidth, self._dockHeight),
+						GroupTransparency = 0,
+					}, Enum.EasingStyle.Back)
+				end)
+			else
+				self._dockPill.Visible = false
+				self._dockPill.Active = false
+			end
+		end
+	else
+		self._dockSphereScale.Scale = 1
+		if self._dockPill then
+			self._dockPill.Visible = self._dockWide == true
+			self._dockPill.Active = self._dockWide == true
+			self._dockPill.Size = UDim2.fromOffset(self._dockWide and self._dockWidth or self._dockHeight, self._dockHeight)
+			self._dockPill.GroupTransparency = self._dockWide and 0 or 1
+		end
+	end
+end
+
+function Window:_hideDock(animate)
+	if not self._dock then return end
+	self._dockShowToken = (self._dockShowToken or 0) + 1
+	local token = self._dockShowToken
+	if self._dockPulse then self._dockPulse:Cancel(); self._dockPulse = nil end
+	if animate == false or State.LowPerformance then
+		self._dockSphereScale.Scale = 0
+		if self._dockPill then
+			self._dockPill.Visible = false
+			self._dockPill.Active = false
+			self._dockPill.GroupTransparency = 1
+			self._dockPill.Size = UDim2.fromOffset(self._dockHeight, self._dockHeight)
+		end
+		self._dock.Visible = false
+		return
+	end
+	if self._dockPill and self._dockPill.Visible then
+		self._dockPill.Active = false
+		tween(self._dockPill, Anim.Fast, {
+			Size = UDim2.fromOffset(self._dockHeight, self._dockHeight),
+			GroupTransparency = 1,
+		}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	end
+	tween(self._dockSphereScale, Anim.Fast, { Scale = 0 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	task.delay(Anim.Fast + 0.03, function()
+		if self._state == "Destroyed" or self._dockShowToken ~= token then return end
+		if self._state ~= "Minimized" and self._state ~= "Minimizing" then
+			if self._dockPill then self._dockPill.Visible = false end
+			self._dock.Visible = false
+		end
+	end)
+end
+
 function Window:_showBall()
 	if self._dockActive then
-		self._ball.Visible = false
+		self:_showDock(true)
 		return
 	end
 	self._ball.Visible = true
@@ -4598,12 +4952,14 @@ function Window:Restore()
 
 	local function settle()
 		if self._transition ~= token or self._state ~= "Restoring" then return end
+		if self._dockActive then self:_hideDock(false) end
 		self:_setState("Open")
 	end
 
 	if state == "Minimizing" then
 		-- minimizacao em andamento: o painel ainda esta visivel, so reverte
 		self:_setState("Restoring")
+		if self._dockActive then self:_hideDock(false) end
 		local size = self:_getSize()
 		tween(root, Anim.Slow, {
 			Position = clampWindowPosition(self._restorePosition or root.Position, size),
@@ -4615,12 +4971,16 @@ function Window:Restore()
 	end
 
 	self:_setState("Restoring")
-	if self._dockActive then self._ball.Position = self:_dockCenter() end
-	local ballPosition = self._ball.Position
-	tween(self._ballScale, Anim.Fast, { Scale = 0 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	local ballPosition = self._dockActive and self:_dockCenter() or self._ball.Position
+	if self._dockActive then
+		self:_hideDock(true)
+	else
+		tween(self._ballScale, Anim.Fast, { Scale = 0 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	end
 
 	local function expand()
 		if self._transition ~= token or self._state ~= "Restoring" then return end
+		if self._dockActive then self:_hideDock(false) end
 		self._ball.Visible = false
 		local size = self:_getSize()
 		root.Size = size
@@ -4800,6 +5160,7 @@ function Window:Close(skipConfirm)
 	local wasHidden = not self._root.Visible
 	self._transition = (self._transition or 0) + 1
 	self:_setState("Closing")
+	if self._dockActive then self:_hideDock(false) end
 	safeCall(self._onClose)
 	if wasHidden then self:Destroy(); return end
 	tween(self._root, Anim.Normal, { GroupTransparency = 1 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
@@ -4810,6 +5171,7 @@ end
 function Window:Destroy()
 	if self._state == "Destroyed" then return end
 	self._state = "Destroyed"
+	if self._dockActive then self:_hideDock(false) end
 	for index, window in ipairs(Windows) do
 		if window == self then table.remove(Windows, index); break end
 	end
@@ -4817,6 +5179,7 @@ function Window:Destroy()
 	table.clear(self._connections)
 	if self._cameraConnection then self._cameraConnection:Disconnect(); self._cameraConnection = nil end
 	if self._pulse then self._pulse:Cancel(); self._pulse = nil end
+	if self._dockPulse then self._dockPulse:Cancel(); self._dockPulse = nil end
 	if self._confirmLayer then self._confirmLayer:Destroy(); self._confirmLayer = nil end
 	if self._gui then
 		cancelTweensUnder(self._gui)
@@ -4871,9 +5234,17 @@ local function pointInFrame(frame, point, pad)
 end
 
 function Window:_dockCenter()
-	local sphere = self._dockSphere
-	local center = sphere.AbsolutePosition + sphere.AbsoluteSize / 2
-	return UDim2.fromOffset(center.X, center.Y)
+	if self._dock and self._dock.Visible and self._dockSphere then
+		local sphere = self._dockSphere
+		local center = sphere.AbsolutePosition + sphere.AbsoluteSize / 2
+		return UDim2.fromOffset(center.X, center.Y)
+	end
+	local dock = self._dock
+	local pos = (dock and dock.Position) or DockMemory.Position or UDim2.new(0.5, 0, 0, self._metrics.Mobile and 14 or 12)
+	local viewport = getViewport()
+	local cx = pos.X.Scale * viewport.X + pos.X.Offset
+	local cy = pos.Y.Scale * viewport.Y + pos.Y.Offset + (self._dockSphereSize or 54) / 2
+	return UDim2.fromOffset(cx, cy)
 end
 
 function Window:_dockClamp(position, wide)
@@ -4917,26 +5288,31 @@ function Window:_buildDock(config)
 	local pillShown = DockMemory.Hidden ~= true
 
 	self._dockWidth = width
+	self._dockHeight = height
 	self._dockSphereSize = sphereSize
 	self._dockWide = pillShown
 	self._dockActive = true
+	self._dockShowToken = 0
 
+	-- Dock comeca oculto; aparece apenas quando o painel principal esta minimizado.
 	local dock = create("Frame", {
 		Name = "Dock", AnchorPoint = Vector2.new(0.5, 0),
 		Position = DockMemory.Position or UDim2.new(0.5, 0, 0, mobile and 14 or 12),
 		Size = UDim2.fromOffset(width, sphereSize),
-		BackgroundTransparency = 1, Active = false, ZIndex = 2, Parent = self._gui,
+		BackgroundTransparency = 1, Active = false, Visible = false,
+		ZIndex = 2, Parent = self._gui,
 	})
 	self._dock = dock
 
 	local pill = create("CanvasGroup", {
 		Name = "Pill", AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(pillShown and width or height, height),
+		Size = UDim2.fromOffset(height, height),
 		BackgroundColor3 = Theme.Background, BackgroundTransparency = 0.3,
-		GroupTransparency = pillShown and 0 or 1, Visible = pillShown,
-		Active = pillShown, ZIndex = 1, Parent = dock,
+		GroupTransparency = 1, Visible = false,
+		Active = false, ZIndex = 1, Parent = dock,
 	})
+	self._dockPill = pill
 	addCornerScale(pill, 0.5)
 	local pillStroke = addStroke(pill, Theme.White, 0.55, 1)
 	create("UIGradient", {
@@ -4979,29 +5355,38 @@ function Window:_buildDock(config)
 		end
 	end
 
-	local function requireOpen()
+	local function runAfterOpen(fn)
 		if self._state == "Minimized" or self._state == "Minimizing" then
 			self:Restore()
-			return false
+			local delayWait = State.LowPerformance and 0.03 or (Anim.Fast + Anim.Slow + 0.08)
+			task.delay(delayWait, function()
+				if self._state == "Destroyed" then return end
+				safeCall(fn)
+			end)
+			return
 		end
-		return self._state == "Open"
+		if self._state == "Open" then safeCall(fn) end
 	end
 
 	local slotDefs = {
 		{ Icon = "menu", X = sideWidth * 0.3, Action = function()
-			if requireOpen() then self:ToggleSidebar() end
+			runAfterOpen(function() self:ToggleSidebar() end)
 		end },
 		{ Icon = "star", X = sideWidth * 0.72, Action = function()
-			if requireOpen() then
+			runAfterOpen(function()
 				self:ToggleFavoritesMode()
 				refreshStarSlot()
-			end
+			end)
 		end },
 		{ Icon = "search", X = width - sideWidth * 0.72, Action = function()
-			if requireOpen() then self._searchBox:CaptureFocus() end
+			runAfterOpen(function()
+				if self._searchBox then self._searchBox:CaptureFocus() end
+			end)
 		end },
 		{ Icon = "settings", X = width - sideWidth * 0.3, Action = function()
-			if requireOpen() and self._settingsTab then self:SelectTab(self._settingsTab) end
+			runAfterOpen(function()
+				if self._settingsTab then self:SelectTab(self._settingsTab) end
+			end)
 		end },
 	}
 
@@ -5030,6 +5415,7 @@ function Window:_buildDock(config)
 	addCornerScale(sphere, 0.5)
 	local sphereStroke = addStroke(sphere, accentLight(), 0.4, 1.5)
 	local sphereScale = create("UIScale", { Scale = 0, Parent = sphere })
+	self._dockSphereScale = sphereScale
 	local sphereGloss = create("Frame", {
 		Name = "Gloss", BackgroundColor3 = Theme.White,
 		Size = UDim2.fromScale(1, 1), Active = false, ZIndex = 6, Parent = sphere,
@@ -5226,18 +5612,6 @@ function Window:_buildDock(config)
 		sphereStroke.Color = accentLight()
 		refreshStarSlot()
 	end)
-
-	tween(sphereScale, Anim.Slow, { Scale = 1 }, Enum.EasingStyle.Back)
-	if pillShown then
-		pill.Size = UDim2.fromOffset(height, height)
-		pill.GroupTransparency = 1
-		task.delay(0.18, function()
-			if self._state == "Destroyed" or not pillShown then return end
-			tween(pill, Anim.Slow, {
-				Size = UDim2.fromOffset(width, height), GroupTransparency = 0,
-			}, Enum.EasingStyle.Back)
-		end)
-	end
 end
 
 function AetherUI.CreateWindow(config)
@@ -5250,6 +5624,17 @@ function AetherUI.CreateWindow(config)
 	if previous and previous:IsA("ScreenGui") then previous:Destroy() end
 
 	local self = setmetatable({}, Window)
+	self._guiName = guiName
+	local cfgSaving = typeof(config.ConfigurationSaving) == "table" and config.ConfigurationSaving or nil
+	self._configFolder = sanitizeFileName(
+		(cfgSaving and cfgSaving.FolderName) or config.ConfigFolder or guiName
+	)
+	self._configFile = sanitizeFileName(
+		(cfgSaving and cfgSaving.FileName) or config.ConfigFile or "default"
+	)
+	self._autoLoadConfig = (cfgSaving and cfgSaving.Enabled == true) or (config.AutoLoadConfig == true)
+	self._pendingConfigData = nil
+
 	self._compact = config.Compact == true
 	local m = computeMetrics(self._compact)
 	self._metrics = m
@@ -5281,6 +5666,49 @@ function AetherUI.CreateWindow(config)
 			if typeof(key) == "string" and not self._favorites[key] then
 				self._favorites[key] = true
 				table.insert(self._favOrder, key)
+			end
+		end
+	end
+
+	if self._autoLoadConfig then
+		local fs = getFsApi()
+		if fs then
+			local _, fullPath = self:_resolveConfigPath(self._configFile)
+			local exists = true
+			if fs.isfile then
+				local okCheck, res = pcall(fs.isfile, fullPath)
+				if okCheck then exists = res == true end
+			end
+			if exists then
+				local okRead, content = pcall(fs.readfile, fullPath)
+				if okRead and typeof(content) == "string" then
+					local okDec, decoded = pcall(function() return HttpService:JSONDecode(content) end)
+					if okDec and typeof(decoded) == "table" then
+						if typeof(decoded.Meta) == "table" then
+							if decoded.Meta.Accent ~= nil then
+								local c = deserializeConfigValue(decoded.Meta.Accent)
+								if typeof(c) == "Color3" then AetherUI.SetAccent(c) end
+							end
+							if typeof(decoded.Meta.Compact) == "boolean" then
+								self._compact = decoded.Meta.Compact
+								self._metrics = computeMetrics(self._compact)
+								m = self._metrics
+							end
+							if typeof(decoded.Meta.LowPerformance) == "boolean" then
+								AetherUI.SetLowPerformance(decoded.Meta.LowPerformance)
+							end
+							if typeof(decoded.Meta.Favorites) == "table" then
+								for _, fk in ipairs(decoded.Meta.Favorites) do
+									if typeof(fk) == "string" and not self._favorites[fk] then
+										self._favorites[fk] = true
+										table.insert(self._favOrder, fk)
+									end
+								end
+							end
+						end
+						self._pendingConfigData = typeof(decoded.Flags) == "table" and decoded.Flags or decoded
+					end
+				end
 			end
 		end
 	end
@@ -5880,6 +6308,12 @@ local function decorate(tab, config, object, kind, live)
 		end
 		win.Flags[config.Flag] = object
 		AetherUI.Flags[config.Flag] = object
+		if win._pendingConfigData ~= nil and win._pendingConfigData[config.Flag] ~= nil and typeof(object.Set) == "function" then
+			local restored = deserializeConfigValue(win._pendingConfigData[config.Flag])
+			if restored ~= nil then
+				pcall(function() object:Set(restored, true) end)
+			end
+		end
 	end
 	return object
 end
@@ -5954,6 +6388,15 @@ function Tab:AddMultiDropdown(config)
 	end
 	object.Multiple = true
 	return decorate(self, asConfig(config), object, "Dropdown", {
+		CurrentValue = function() return object:Get() end,
+		CurrentOption = function() return object:Get() end,
+	})
+end
+
+local rawAddRadioGroup = Tab.AddRadioGroup
+function Tab:AddRadioGroup(config)
+	local object = rawAddRadioGroup(self, config)
+	return decorate(self, asConfig(config), object, "RadioGroup", {
 		CurrentValue = function() return object:Get() end,
 		CurrentOption = function() return object:Get() end,
 	})
@@ -6060,6 +6503,13 @@ function Tab:CreateMultiDropdown(config)
 	return self:CreateDropdown(config)
 end
 
+function Tab:CreateRadioGroup(config)
+	config = copyConfig(config)
+	config.Name = pick(config.Name, "Radio Group")
+	config.Default = pick(config.CurrentOption, config.CurrentValue, config.Default)
+	return self:AddRadioGroup(config)
+end
+
 function Tab:CreateColorPicker(config)
 	config = copyConfig(config)
 	config.Name = pick(config.Name, "Color Picker")
@@ -6072,7 +6522,7 @@ return AetherUI
 --[=[
 	EXEMPLO DE USO (LocalScript)
 
-	-- API padronizada (v2.5.0, estilo Rayfield) - mais exemplos em AetherUI_Examples.lua
+	-- API padronizada (v2.7.0, estilo Rayfield) - mais exemplos em AetherUI_Examples.lua
 	local win = AetherUI.CreateWindow({ Name = "Meu Hub" })
 	local tab = win:CreateTab("Principal", "home")
 	tab:CreateSection("Controles")
