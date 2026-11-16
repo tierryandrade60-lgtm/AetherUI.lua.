@@ -5684,13 +5684,22 @@ function Window:_buildDock(config)
 		local raw = Vector2.new(input.Position.X, input.Position.Y)
 		local inset = getGuiInset()
 		local center = sphere.AbsolutePosition + sphere.AbsoluteSize / 2
-		local radius = sphere.AbsoluteSize.X / 2 + (mobile and 6 or 2)
-		local minDist = (pointerPosition(input, savedOffset) - center).Magnitude
-		minDist = math.min(minDist, (raw - center).Magnitude)
-		if inset.Magnitude > 0 then
-			minDist = math.min(minDist, ((raw + inset) - center).Magnitude)
+		local radius = math.max(sphere.AbsoluteSize.X, sphere.AbsoluteSize.Y) / 2 + (mobile and 12 or 6)
+		local pos, size = sphere.AbsolutePosition, sphere.AbsoluteSize
+		local function inBounds(pt)
+			return pt.X >= pos.X - 4 and pt.X <= pos.X + size.X + 4
+				and pt.Y >= pos.Y - 4 and pt.Y <= pos.Y + size.Y + 4
 		end
-		if minDist <= radius then
+		local hitSphere = inBounds(raw) or (savedOffset and inBounds(raw + savedOffset)) or (inset.Magnitude > 0 and inBounds(raw + inset))
+		if not hitSphere then
+			local minDist = (pointerPosition(input, savedOffset) - center).Magnitude
+			minDist = math.min(minDist, (raw - center).Magnitude)
+			if inset.Magnitude > 0 then
+				minDist = math.min(minDist, ((raw + inset) - center).Magnitude)
+			end
+			hitSphere = minDist <= radius
+		end
+		if hitSphere then
 			self:_dockToggleWindow()
 			return
 		end
