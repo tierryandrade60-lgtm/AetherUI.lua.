@@ -5626,8 +5626,13 @@ function Window:_buildDock(config)
 		end)
 	end
 
-	sphere.InputBegan:Connect(function(input) onBeganFrom("sphere", input) end)
-	sphere.Activated:Connect(function() self:_dockToggleWindow() end)
+	sphere.InputBegan:Connect(function(input)
+		if not isPointer(input) then return end
+		onBeganFrom("sphere", input)
+	end)
+	sphere.Activated:Connect(function()
+		self:_dockToggleWindow()
+	end)
 	pill.InputBegan:Connect(function(input) onBeganFrom("pill", input) end)
 
 	sphere.MouseEnter:Connect(function()
