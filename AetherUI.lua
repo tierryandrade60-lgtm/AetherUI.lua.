@@ -1400,7 +1400,7 @@ function AetherUI.Notify(first, second)
 			BackgroundColor3 = Theme.Surface:Lerp(color, 0.16), Parent = card,
 		})
 		addCorner(badge, 8)
-		local icon = createIcon(iconSpec, badge, 15, color)
+		local icon = createIcon(iconSpec, badge, 15, color, { Size = config.IconSize, Color = config.IconColor })
 		if icon then
 			icon.Instance.AnchorPoint = Vector2.new(0.5, 0.5)
 			icon.Instance.Position = UDim2.fromScale(0.5, 0.5)
@@ -1569,10 +1569,12 @@ end
 
 function Tab:AddSection(config)
 	local text = config
-	local iconSpec = nil
+	local iconSpec, iconSize, iconColor = nil, nil, nil
 	if typeof(config) == "table" then
 		text = config.Text or config.Name
 		iconSpec = config.Icon
+		iconSize = config.IconSize
+		iconColor = config.IconColor
 	end
 	local win = self._window
 	local m = self._metrics
@@ -1580,7 +1582,7 @@ function Tab:AddSection(config)
 		Name = "Section", LayoutOrder = self:_nextOrder(),
 		Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, Parent = self._page,
 	})
-	local icon = createIcon(iconSpec, holder, m.Icon - 2, Theme.SubText)
+	local icon = createIcon(iconSpec, holder, m.Icon - 2, Theme.SubText, { Size = iconSize, Color = iconColor })
 	local bar, barGradient = nil, nil
 	if icon then
 		icon.Instance.AnchorPoint = Vector2.new(0, 0.5)
@@ -1611,8 +1613,9 @@ function Tab:AddSection(config)
 		label.TextSize = m.Text - 2
 		local offsetX = 14
 		if icon then
-			icon:SetSize(m.Icon - 2)
-			offsetX = 4 + (m.Icon - 2) + 8
+			local sz = iconSizeOf(icon, m.Icon - 2)
+			icon:SetSize(sz)
+			offsetX = 4 + sz + 8
 		elseif bar then
 			bar.Size = UDim2.fromOffset(3, m.Compact and 10 or 12)
 		end
@@ -1655,15 +1658,16 @@ function Tab:AddLabel(config)
 	addStroke(label, Theme.StrokeSoft, 0.55, 1)
 	local iconSpec = config.Icon
 	if iconSpec == nil then iconSpec = "info" end
-	local icon = createIcon(iconSpec, label, m.Icon - 2, Theme.Muted)
+	local icon = createIcon(iconSpec, label, m.Icon - 2, Theme.Muted, { Size = config.IconSize, Color = config.IconColor })
 	if icon then icon.Instance.AnchorPoint = Vector2.new(0, 0.5) end
 	win:_onLayout(function()
 		label.Size = UDim2.new(1, 0, 0, m.Row - 4)
 		label.TextSize = m.Text
 		local extra = 0
 		if icon then
-			icon:SetSize(m.Icon - 2)
-			extra = (m.Icon - 2) + 8
+			local sz = iconSizeOf(icon, m.Icon - 2)
+			icon:SetSize(sz)
+			extra = sz + 8
 			icon.Instance.Position = UDim2.new(0, -extra, 0.5, 0)
 		end
 		padding.PaddingLeft = UDim.new(0, 12 + extra)
@@ -1705,7 +1709,7 @@ function Tab:AddButton(config)
 		Name = "TopShine", BackgroundColor3 = Theme.White,
 		BackgroundTransparency = 0.965, Size = UDim2.new(1, 0, 0, 1), Parent = button,
 	})
-	local lead = createIcon(config.Icon, button, m.Icon, Theme.SubText)
+	local lead = createIcon(config.Icon, button, m.Icon, Theme.SubText, { Size = config.IconSize, Color = config.IconColor })
 	if lead then lead.Instance.AnchorPoint = Vector2.new(0, 0.5) end
 	local chevron = createIcon("chevron-right", button, m.Icon - 2, Theme.Muted)
 	chevron.Instance.AnchorPoint = Vector2.new(1, 0.5)
@@ -1715,7 +1719,8 @@ function Tab:AddButton(config)
 		button.TextSize = m.Text
 		local leadExtra = 0
 		if lead then
-			lead:SetSize(m.Icon); leadExtra = m.Icon + 10
+			local sz = iconSizeOf(lead, m.Icon)
+			lead:SetSize(sz); leadExtra = sz + 10
 			lead.Instance.Position = UDim2.new(0, -leadExtra, 0.5, 0)
 		end
 		chevron:SetSize(m.Icon - 2)
@@ -1731,7 +1736,7 @@ function Tab:AddButton(config)
 		tween(button, Anim.Fast, { BackgroundColor3 = Theme.ElementHover })
 		tween(stroke, Anim.Fast, { Color = accent(), Transparency = 0.55 })
 		chevron:Tween(accentLight(), Anim.Fast)
-		if lead then lead:Tween(accentLight(), Anim.Fast) end
+		if lead and not lead.CustomColor then lead:Tween(accentLight(), Anim.Fast) end
 		tween(scale, Anim.Fast, { Scale = 1.005 })
 		tween(chevron.Instance, Anim.Fast, { Position = UDim2.new(1, (m.Icon - 2) + 12, 0.5, 0) })
 	end)
@@ -1742,7 +1747,7 @@ function Tab:AddButton(config)
 		tween(scale, Anim.Fast, { Scale = 1 })
 		tween(chevron.Instance, Anim.Fast, { Position = UDim2.new(1, (m.Icon - 2) + 8, 0.5, 0) })
 		chevron:Tween(Theme.Muted, Anim.Fast)
-		if lead then lead:Tween(Theme.SubText, Anim.Fast) end
+		if lead and not lead.CustomColor then lead:Tween(Theme.SubText, Anim.Fast) end
 	end)
 	button.MouseButton1Down:Connect(function()
 		tween(button, Anim.Micro, { BackgroundColor3 = accentSoft(0.3) })
@@ -1797,7 +1802,7 @@ function Tab:AddToggle(config)
 		Name = "TopShine", BackgroundColor3 = Theme.White,
 		BackgroundTransparency = 0.97, Size = UDim2.new(1, 0, 0, 1), Parent = row,
 	})
-	local lead = createIcon(config.Icon, row, m.Icon, Theme.SubText)
+	local lead = createIcon(config.Icon, row, m.Icon, Theme.SubText, { Size = config.IconSize, Color = config.IconColor })
 	if lead then
 		lead.Instance.AnchorPoint = Vector2.new(0, 0.5)
 		lead.Instance.Position = UDim2.new(0, 14, 0.5, 0)
@@ -1880,7 +1885,7 @@ function Tab:AddToggle(config)
 			Color = on and accent() or Theme.StrokeSoft,
 			Transparency = on and 0.5 or 0.35,
 		}, animate, Anim.Normal)
-		if lead then
+		if lead and not lead.CustomColor then
 			if animate then lead:Tween(on and accentLight() or Theme.SubText, Anim.Normal)
 			else lead:SetColor(on and accentLight() or Theme.SubText) end
 		end
@@ -1891,7 +1896,8 @@ function Tab:AddToggle(config)
 		label.TextSize = m.Text
 		local leftX = 14
 		if lead then
-			lead:SetSize(m.Icon); leftX = 14 + m.Icon + 10
+			local sz = iconSizeOf(lead, m.Icon)
+			lead:SetSize(sz); leftX = 14 + sz + 10
 		end
 		label.Position = UDim2.fromOffset(leftX, 0)
 		label.Size = UDim2.new(1, -(leftX + m.SwitchW + 28), 1, 0)
@@ -1909,7 +1915,7 @@ function Tab:AddToggle(config)
 			setProps(glow, { BackgroundColor3 = accent() }, animate, Anim.Normal)
 			setProps(knobInnerStroke, { Color = accent() }, animate, Anim.Normal)
 		end
-		if lead then lead:SetColor(state and accentLight() or Theme.SubText) end
+		if lead and not lead.CustomColor then lead:SetColor(state and accentLight() or Theme.SubText) end
 		setProps(stroke, { Color = state and accent() or Theme.StrokeSoft }, animate, Anim.Normal)
 	end)
 
@@ -1996,7 +2002,7 @@ function Tab:AddSlider(config)
 	})
 	addCorner(holder, 10)
 	addStroke(holder, Theme.StrokeSoft, 0.35, 1)
-	local lead = createIcon(config.Icon, holder, m.Icon, Theme.SubText)
+	local lead = createIcon(config.Icon, holder, m.Icon, Theme.SubText, { Size = config.IconSize, Color = config.IconColor })
 	if lead then
 		lead.Instance.AnchorPoint = Vector2.new(0, 0.5)
 		lead.Instance.Position = UDim2.new(0, 14, 0, 17)
@@ -2019,7 +2025,7 @@ function Tab:AddSlider(config)
 	attachValuePop(valueLabel, 1.1, 0.12)
 	local track = create("Frame", {
 		Name = "Track", AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 1, -16), Size = UDim2.new(1, -28, 0, 5),
+		Position = UDim2.new(0.5, 0, 1, -16), Size = UDim2.new(1, -28, 0, m.Mobile and 6 or 5),
 		BackgroundColor3 = Theme.OffDeep, Parent = holder,
 	})
 	addCornerScale(track, 0.5)
@@ -2031,7 +2037,7 @@ function Tab:AddSlider(config)
 	addGradient(fill, NumberSequence.new({
 		NumberSequenceKeypoint.new(0, 0.35), NumberSequenceKeypoint.new(1, 0),
 	}), 0)
-	local function knobBase() return m.Compact and 14 or 16 end
+	local function knobBase() return m.Compact and (m.Mobile and 16 or 14) or (m.Mobile and 20 or 16) end
 	local knob = create("Frame", {
 		Name = "Knob", AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.new(0, 0, 0.5, 0),
@@ -2057,10 +2063,10 @@ function Tab:AddSlider(config)
 	local hit = create("TextButton", {
 		Name = "Hit", AnchorPoint = Vector2.new(0, 1),
 		BackgroundTransparency = 1, Position = UDim2.new(0, 0, 1, 0),
-		Size = UDim2.new(1, 0, 0, 34), Text = "",
-		AutoButtonColor = false, ZIndex = 3, Parent = holder,
+		Size = UDim2.new(1, 0, 0, m.Mobile and 42 or 34), Text = "",
+		AutoButtonColor = false, Active = true, ZIndex = 3, Parent = holder,
 	})
-	local dragging = false
+	local dragging, activeInput, lockedOffset = false, nil, nil
 	local function render(animate)
 		local alpha = 0
 		if max > min then alpha = (value - min) / (max - min) end
@@ -2079,9 +2085,13 @@ function Tab:AddSlider(config)
 		nameLabel.TextSize = m.Text
 		valueLabel.TextSize = m.Text - 1
 		local leftX = 14
-		if lead then lead:SetSize(m.Icon); leftX = 14 + m.Icon + 10 end
+		if lead then
+			local sz = iconSizeOf(lead, m.Icon)
+			lead:SetSize(sz); leftX = 14 + sz + 10
+		end
 		nameLabel.Position = UDim2.fromOffset(leftX, 8)
 		nameLabel.Size = UDim2.new(1, -(leftX + 82), 0, 18)
+		hit.Size = UDim2.new(1, 0, 0, m.Mobile and 42 or 34)
 		local size = dragging and (knobBase() + 4) or knobBase()
 		knob.Size = UDim2.fromOffset(size, size)
 		knobRing.Size = UDim2.fromOffset(size - 8, size - 8)
@@ -2105,12 +2115,13 @@ function Tab:AddSlider(config)
 	local function updateFromInput(input)
 		local width = track.AbsoluteSize.X
 		if width <= 0 then return end
-		local alpha = math.clamp((pointerPosition(input).X - track.AbsolutePosition.X) / width, 0, 1)
+		local px = pointerPosition(input, lockedOffset).X
+		local alpha = math.clamp((px - track.AbsolutePosition.X) / width, 0, 1)
 		object:Set(min + (max - min) * alpha)
 	end
-	local function startDragging()
+	local function startDragging(input)
 		if dragging then return end
-		dragging = true
+		dragging = true; activeInput = input; lockedOffset = detectPointerOffset(input, hit)
 		self._page.ScrollingEnabled = false
 		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(knobBase() + 4, knobBase() + 4) })
 		tween(knobRing, Anim.Fast, { Size = UDim2.fromOffset(knobBase() - 4, knobBase() - 4) })
@@ -2119,32 +2130,39 @@ function Tab:AddSlider(config)
 	end
 	local function stopDragging()
 		if not dragging then return end
-		dragging = false
+		dragging = false; activeInput = nil; lockedOffset = nil
 		self._page.ScrollingEnabled = true
 		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(knobBase(), knobBase()) })
 		tween(knobRing, Anim.Fast, { Size = UDim2.fromOffset(knobBase() - 8, knobBase() - 8) })
 		tween(knobHalo, Anim.Fast, { Transparency = 1 })
 		tween(valueLabel, Anim.Fast, { TextColor3 = Theme.SubText })
 	end
-	local moveConn, endConn
+	local moveConn, hitMoveConn, endConn
 	local function untrack()
 		if moveConn then moveConn:Disconnect(); moveConn = nil end
+		if hitMoveConn then hitMoveConn:Disconnect(); hitMoveConn = nil end
 		if endConn then endConn:Disconnect(); endConn = nil end
 	end
-	table.insert(self._connections, { Disconnect = untrack })
+	table.insert(self._connections, { Disconnect = function() untrack(); stopDragging() end })
+	local function handleMove(changed)
+		if not dragging then return end
+		if changed.UserInputType == Enum.UserInputType.MouseMovement
+			or (changed.UserInputType == Enum.UserInputType.Touch and (activeInput == nil or changed == activeInput)) then
+			updateFromInput(changed)
+		end
+	end
 	hit.InputBegan:Connect(function(input)
 		if not isPointer(input) then return end
 		if dragging then return end
-		startDragging(); updateFromInput(input)
+		startDragging(input); updateFromInput(input)
 		untrack()
-		moveConn = UserInputService.InputChanged:Connect(function(changed)
-			if changed.UserInputType == Enum.UserInputType.MouseMovement
-				or changed.UserInputType == Enum.UserInputType.Touch then
-				updateFromInput(changed)
-			end
-		end)
+		hitMoveConn = hit.InputChanged:Connect(handleMove)
+		moveConn = UserInputService.InputChanged:Connect(handleMove)
 		endConn = UserInputService.InputEnded:Connect(function(ended)
-			if isPointer(ended) then
+			if not dragging then return end
+			local same = ended == activeInput or (activeInput and ended.UserInputType == Enum.UserInputType.MouseButton1
+				and activeInput.UserInputType == Enum.UserInputType.MouseButton1)
+			if same or (not activeInput and isPointer(ended)) then
 				untrack()
 				stopDragging()
 			end
@@ -2182,7 +2200,7 @@ local function buildDropdownShell(tab, config, className)
 		BackgroundTransparency = 1, Text = "",
 		AutoButtonColor = false, Parent = root,
 	})
-	local lead = createIcon(config.Icon, header, m.Icon, Theme.SubText)
+	local lead = createIcon(config.Icon, header, m.Icon, Theme.SubText, { Size = config.IconSize, Color = config.IconColor })
 	if lead then
 		lead.Instance.AnchorPoint = Vector2.new(0, 0.5)
 		lead.Instance.Position = UDim2.new(0, 14, 0.5, 0)
@@ -2333,7 +2351,8 @@ local function buildDropdownShell(tab, config, className)
 		valueLabel.TextSize = m.Text - 1
 		local leftX = 14
 		if lead then
-			lead:SetSize(m.Icon); leftX = 14 + m.Icon + 10
+			local sz = iconSizeOf(lead, m.Icon)
+			lead:SetSize(sz); leftX = 14 + sz + 10
 		end
 		label.Position = UDim2.fromOffset(leftX, 0)
 		label.Size = UDim2.new(0.5, -leftX, 1, 0)
@@ -2616,6 +2635,240 @@ function Tab:AddMultiDropdown(config)
 end
 
 ----------------------------------------------------------------
+-- RadioGroup - grupo de selecao exclusiva inline (v2.7.0)
+----------------------------------------------------------------
+function Tab:AddRadioGroup(config)
+	config = config or {}
+	local win = self._window
+	local m = self._metrics
+	local options = {}
+	for i, value in ipairs(config.Options or {}) do options[i] = value end
+	local selected = config.Default
+	if selected ~= nil and not table.find(options, selected) then selected = nil end
+
+	local root = create("Frame", {
+		Name = "RadioGroup", LayoutOrder = self:_nextOrder(),
+		Size = UDim2.new(1, 0, 0, m.Row),
+		BackgroundColor3 = Theme.Element, BackgroundTransparency = Glass.Element,
+		ClipsDescendants = true, Parent = self._page,
+	})
+	addCorner(root, 10)
+	addStroke(root, Theme.StrokeSoft, 0.35, 1)
+
+	local header = create("Frame", {
+		Name = "Header", Size = UDim2.new(1, 0, 0, m.Compact and 32 or 38),
+		BackgroundTransparency = 1, Parent = root,
+	})
+	local lead = createIcon(config.Icon or "radio", header, m.Icon, Theme.SubText, { Size = config.IconSize, Color = config.IconColor })
+	if lead then
+		lead.Instance.AnchorPoint = Vector2.new(0, 0.5)
+		lead.Instance.Position = UDim2.new(0, 14, 0.5, 0)
+	end
+	local titleLabel = create("TextLabel", {
+		Name = "Label", BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(14, 0), Size = UDim2.new(0.55, -14, 1, 0),
+		Text = tostring(config.Name or "Radio Group"), Font = Theme.Font,
+		TextSize = m.Text, TextColor3 = Theme.Text,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd, Parent = header,
+	})
+	local valueLabel = create("TextLabel", {
+		Name = "Value", AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -14, 0.5, 0), Size = UDim2.new(0.45, -14, 1, 0),
+		BackgroundTransparency = 1, Text = "",
+		Font = Theme.FontBold, TextSize = m.Text - 1,
+		TextColor3 = Theme.Muted, TextXAlignment = Enum.TextXAlignment.Right,
+		TextTruncate = Enum.TextTruncate.AtEnd, Parent = header,
+	})
+	attachValuePop(valueLabel, 1.06, 0)
+
+	local listHolder = create("Frame", {
+		Name = "Options", BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(8, m.Compact and 32 or 38),
+		Size = UDim2.new(1, -16, 0, 0), Parent = root,
+	})
+	create("UIListLayout", {
+		Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder, Parent = listHolder,
+	})
+
+	local rows = {}
+	local object = { Instance = root }
+
+	local function optionHeight()
+		if m.Mobile then return m.Compact and 36 or 42 end
+		return m.Compact and 28 or 34
+	end
+	local function headerHeight()
+		return m.Compact and 32 or 38
+	end
+	local function updateSize()
+		local hh = headerHeight()
+		local oh = optionHeight()
+		local listH = (#options > 0) and (#options * oh + math.max(#options - 1, 0) * 4) or 0
+		local total = hh + listH + ((#options > 0) and 8 or 2)
+		header.Size = UDim2.new(1, 0, 0, hh)
+		listHolder.Position = UDim2.fromOffset(8, hh)
+		listHolder.Size = UDim2.new(1, -16, 0, listH)
+		root.Size = UDim2.new(1, 0, 0, total)
+		self:_refresh()
+	end
+
+	local function paint(animate)
+		for i, row in ipairs(rows) do
+			local isSel = selected ~= nil and options[i] == selected
+			setProps(row.Button, {
+				BackgroundColor3 = isSel and accentSoft(0.22) or Theme.Surface,
+				BackgroundTransparency = isSel and 0.15 or 0.45,
+			}, animate, Anim.Fast)
+			setProps(row.RowStroke, {
+				Color = isSel and accent() or Theme.StrokeSoft,
+				Transparency = isSel and 0.45 or 0.7,
+			}, animate, Anim.Fast)
+			setProps(row.RingStroke, {
+				Color = isSel and accentLight() or Theme.Muted,
+				Transparency = isSel and 0.05 or 0.35,
+			}, animate, Anim.Fast)
+			setProps(row.Dot, { BackgroundColor3 = accentLight() }, animate, Anim.Fast)
+			setProps(row.DotScale, { Scale = isSel and 1 or 0 }, animate, Anim.Spring, Enum.EasingStyle.Back)
+			setProps(row.Label, { TextColor3 = isSel and Theme.Text or Theme.SubText }, animate, Anim.Fast)
+		end
+		valueLabel.Text = selected ~= nil and tostring(selected) or "Nenhum"
+		valueLabel.TextColor3 = selected ~= nil and accentLight() or Theme.Muted
+	end
+
+	local function rebuild()
+		for _, row in ipairs(rows) do row.Button:Destroy() end
+		rows = {}
+		local oh = optionHeight()
+		for i, opt in ipairs(options) do
+			local isSel = selected ~= nil and opt == selected
+			local btn = create("TextButton", {
+				Name = "Radio" .. i, LayoutOrder = i,
+				Size = UDim2.new(1, 0, 0, oh),
+				BackgroundColor3 = isSel and accentSoft(0.22) or Theme.Surface,
+				BackgroundTransparency = isSel and 0.15 or 0.45,
+				AutoButtonColor = false, Active = true, Text = "", Parent = listHolder,
+			})
+			addCorner(btn, 8)
+			local rowStroke = addStroke(btn, isSel and accent() or Theme.StrokeSoft, isSel and 0.45 or 0.7, 1)
+			local ringSize = m.Mobile and 18 or 16
+			local ring = create("Frame", {
+				Name = "Ring", AnchorPoint = Vector2.new(0, 0.5),
+				Position = UDim2.new(0, 10, 0.5, 0),
+				Size = UDim2.fromOffset(ringSize, ringSize),
+				BackgroundTransparency = 1, Parent = btn,
+			})
+			addCornerScale(ring, 0.5)
+			local ringStroke = create("UIStroke", {
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+				Color = isSel and accentLight() or Theme.Muted,
+				Thickness = 1.6, Transparency = isSel and 0.05 or 0.35, Parent = ring,
+			})
+			local dot = create("Frame", {
+				Name = "Dot", AnchorPoint = Vector2.new(0.5, 0.5),
+				Position = UDim2.fromScale(0.5, 0.5),
+				Size = UDim2.fromOffset(math.floor(ringSize * 0.5), math.floor(ringSize * 0.5)),
+				BackgroundColor3 = accentLight(), Parent = ring,
+			})
+			addCornerScale(dot, 0.5)
+			local dotScale = create("UIScale", { Scale = isSel and 1 or 0, Parent = dot })
+			local optLabel = create("TextLabel", {
+				Name = "L", BackgroundTransparency = 1,
+				Position = UDim2.fromOffset(10 + ringSize + 10, 0),
+				Size = UDim2.new(1, -(20 + ringSize + 10), 1, 0),
+				Text = tostring(opt), Font = Theme.Font,
+				TextSize = m.Text - 1,
+				TextColor3 = isSel and Theme.Text or Theme.SubText,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextTruncate = Enum.TextTruncate.AtEnd, Parent = btn,
+			})
+			btn.MouseEnter:Connect(function()
+				if options[i] ~= selected then
+					tween(btn, Anim.Fast, { BackgroundColor3 = Theme.ElementHover, BackgroundTransparency = 0.1 })
+				end
+			end)
+			btn.MouseLeave:Connect(function()
+				local cur = options[i] == selected
+				tween(btn, Anim.Fast, {
+					BackgroundColor3 = cur and accentSoft(0.22) or Theme.Surface,
+					BackgroundTransparency = cur and 0.15 or 0.45,
+				})
+			end)
+			btn.Activated:Connect(function() object:Set(opt) end)
+			rows[i] = {
+				Button = btn, Label = optLabel, RowStroke = rowStroke,
+				Ring = ring, RingStroke = ringStroke, Dot = dot, DotScale = dotScale,
+			}
+		end
+		updateSize()
+		paint(false)
+	end
+
+	function object:Set(value, silent)
+		if value == nil then
+			object:Clear(silent)
+			return
+		end
+		if not table.find(options, value) then return end
+		if value == selected then return end
+		selected = value
+		paint(true)
+		if not silent then safeCall(config.Callback, selected) end
+	end
+	function object:Get() return selected end
+	function object:Clear(silent)
+		if selected == nil then return end
+		selected = nil
+		paint(true)
+		if not silent then safeCall(config.Callback, nil) end
+	end
+	function object:SetOptions(newOptions, silent)
+		if typeof(newOptions) ~= "table" then return end
+		table.clear(options)
+		for i, value in ipairs(newOptions) do options[i] = value end
+		local changed = false
+		if selected ~= nil and not table.find(options, selected) then
+			selected = nil; changed = true
+		end
+		rebuild()
+		if changed and not silent then safeCall(config.Callback, selected) end
+	end
+	object.Refresh = object.SetOptions
+	function object:SetText(newText) titleLabel.Text = tostring(newText) end
+
+	win:_onLayout(function()
+		titleLabel.TextSize = m.Text
+		valueLabel.TextSize = m.Text - 1
+		local leftX = 14
+		if lead then
+			local sz = iconSizeOf(lead, m.Icon)
+			lead:SetSize(sz); leftX = 14 + sz + 10
+		end
+		titleLabel.Position = UDim2.fromOffset(leftX, 0)
+		titleLabel.Size = UDim2.new(0.55, -leftX, 1, 0)
+		local oh = optionHeight()
+		local ringSize = m.Mobile and 18 or 16
+		for _, row in ipairs(rows) do
+			row.Button.Size = UDim2.new(1, 0, 0, oh)
+			row.Ring.Size = UDim2.fromOffset(ringSize, ringSize)
+			row.Dot.Size = UDim2.fromOffset(math.floor(ringSize * 0.5), math.floor(ringSize * 0.5))
+			row.Label.TextSize = m.Text - 1
+			row.Label.Position = UDim2.fromOffset(10 + ringSize + 10, 0)
+			row.Label.Size = UDim2.new(1, -(20 + ringSize + 10), 1, 0)
+		end
+		updateSize()
+	end)
+	win:_onAccent(function(animate) paint(animate) end)
+
+	rebuild()
+	self:_register("RadioGroup", root, function() return titleLabel.Text end, {
+		Options = options, FlashTarget = header,
+		RowFor = function(i) return rows[i] and rows[i].Button or nil end,
+	})
+	return object
+end
+
+----------------------------------------------------------------
 -- ColorPicker (v2.3.0)
 -- Seletor circular (quadrado SV) + painel de tonalidades (hue) ao lado,
 -- tons, presets e campo HEX. Sem faixas RGB.
@@ -2676,7 +2929,7 @@ function Tab:AddColorPicker(config)
 		BackgroundTransparency = 1, Text = "",
 		AutoButtonColor = false, Parent = root,
 	})
-	local lead = createIcon(config.Icon or "palette", header, m.Icon, Theme.SubText)
+	local lead = createIcon(config.Icon or "palette", header, m.Icon, Theme.SubText, { Size = config.IconSize, Color = config.IconColor })
 	if lead then
 		lead.Instance.AnchorPoint = Vector2.new(0, 0.5)
 		lead.Instance.Position = UDim2.new(0, 14, 0.5, 0)
@@ -2716,8 +2969,8 @@ function Tab:AddColorPicker(config)
 	})
 
 	-- Linha 1: quadrado SV (seletor circular) + faixa de tonalidades ao lado
-	local pickH = m.Mobile and 124 or 112
-	local hueW = m.Mobile and 24 or 18
+	local pickH = m.Mobile and 140 or 112
+	local hueW = m.Mobile and 26 or 18
 	local pickRow = create("Frame", {
 		Name = "Pick", LayoutOrder = 1,
 		Size = UDim2.new(1, 0, 0, pickH), BackgroundTransparency = 1, Parent = panel,
@@ -2749,10 +3002,11 @@ function Tab:AddColorPicker(config)
 		}),
 		Rotation = 90, Parent = valOverlay,
 	})
+	local selectorSize = m.Mobile and 20 or 16
 	local svSelector = create("Frame", {
 		Name = "Selector", AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(s, 1 - v),
-		Size = UDim2.fromOffset(16, 16), BackgroundColor3 = current,
+		Size = UDim2.fromOffset(selectorSize, selectorSize), BackgroundColor3 = current,
 		ZIndex = 5, Parent = svSquare,
 	})
 	addCornerScale(svSelector, 0.5)
@@ -2763,7 +3017,7 @@ function Tab:AddColorPicker(config)
 	local svHit = create("TextButton", {
 		Name = "Hit", BackgroundTransparency = 1,
 		Size = UDim2.fromScale(1, 1), Text = "",
-		AutoButtonColor = false, ZIndex = 4, Parent = svSquare,
+		AutoButtonColor = false, Active = true, ZIndex = 4, Parent = svSquare,
 	})
 
 	local hueBar = create("Frame", {
@@ -2796,10 +3050,11 @@ function Tab:AddColorPicker(config)
 		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 		Color = Theme.White, Thickness = 2, Parent = hueSelector,
 	})
+	local huePad = m.Mobile and 10 or 6
 	local hueHit = create("TextButton", {
 		Name = "Hit", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(-6, -6), Size = UDim2.new(1, 12, 1, 12),
-		Text = "", AutoButtonColor = false, ZIndex = 4, Parent = hueBar,
+		Position = UDim2.fromOffset(-huePad, -huePad), Size = UDim2.new(1, huePad * 2, 1, huePad * 2),
+		Text = "", AutoButtonColor = false, Active = true, ZIndex = 4, Parent = hueBar,
 	})
 
 	-- Linha 2: preview + campo HEX (editavel)
@@ -2909,10 +3164,10 @@ function Tab:AddColorPicker(config)
 	function object:Get() return current end
 	function object:SetText(newText) nameLabel.Text = tostring(newText) end
 
-	-- Interacao por arraste (mouse e toque)
-	local dragging, activeInput = nil, nil
+	-- Interacao por arraste com calibracao exata do espaco de tela (mouse e toque mobile)
+	local dragging, activeInput, dragOffset = nil, nil, nil
 	local function localPoint(input, gui)
-		local p = pointerPosition(input)
+		local p = pointerPosition(input, dragOffset)
 		local pos, size = gui.AbsolutePosition, gui.AbsoluteSize
 		if size.X <= 0 or size.Y <= 0 then return nil, nil end
 		return math.clamp((p.X - pos.X) / size.X, 0, 1), math.clamp((p.Y - pos.Y) / size.Y, 0, 1)
@@ -2932,25 +3187,31 @@ function Tab:AddColorPicker(config)
 		paintUI()
 		safeCall(config.Callback, current)
 	end
-	local dragMoveConn, dragEndConn
+	local dragMoveConn, hitMoveConn, dragEndConn
 	local function untrackDrag()
 		if dragMoveConn then dragMoveConn:Disconnect(); dragMoveConn = nil end
+		if hitMoveConn then hitMoveConn:Disconnect(); hitMoveConn = nil end
 		if dragEndConn then dragEndConn:Disconnect(); dragEndConn = nil end
 	end
 	local endDrag
-	local function beginDrag(kind, input)
+	local function handleDragMove(changed)
+		if not dragging then return end
+		if changed.UserInputType == Enum.UserInputType.MouseMovement
+			or (changed.UserInputType == Enum.UserInputType.Touch and (activeInput == nil or changed == activeInput)) then
+			updateDrag(changed)
+		end
+	end
+	local function beginDrag(kind, input, refGui, hitBtn)
 		if dragging then return end
 		dragging = kind; activeInput = input
+		dragOffset = detectPointerOffset(input, refGui)
 		self._page.ScrollingEnabled = false
 		updateDrag(input)
 		untrackDrag()
-		dragMoveConn = UserInputService.InputChanged:Connect(function(changed)
-			if not dragging then return end
-			if changed.UserInputType == Enum.UserInputType.MouseMovement
-				or (changed.UserInputType == Enum.UserInputType.Touch and changed == activeInput) then
-				updateDrag(changed)
-			end
-		end)
+		if hitBtn then
+			hitMoveConn = hitBtn.InputChanged:Connect(handleDragMove)
+		end
+		dragMoveConn = UserInputService.InputChanged:Connect(handleDragMove)
 		dragEndConn = UserInputService.InputEnded:Connect(function(ended)
 			if not dragging or not activeInput then return end
 			local same = ended == activeInput or (ended.UserInputType == Enum.UserInputType.MouseButton1
@@ -2961,16 +3222,16 @@ function Tab:AddColorPicker(config)
 	function endDrag()
 		untrackDrag()
 		if not dragging then return end
-		dragging = nil; activeInput = nil
+		dragging = nil; activeInput = nil; dragOffset = nil
 		self._page.ScrollingEnabled = true
 	end
 	svHit.InputBegan:Connect(function(input)
-		if isPointer(input) then beginDrag("sv", input) end
+		if isPointer(input) then beginDrag("sv", input, svSquare, svHit) end
 	end)
 	hueHit.InputBegan:Connect(function(input)
-		if isPointer(input) then beginDrag("hue", input) end
+		if isPointer(input) then beginDrag("hue", input, hueBar, hueHit) end
 	end)
-	table.insert(self._connections, { Disconnect = untrackDrag })
+	table.insert(self._connections, { Disconnect = function() untrackDrag(); endDrag() end })
 
 	-- Campo HEX
 	hexBox.Focused:Connect(function()
@@ -3022,12 +3283,10 @@ function Tab:AddColorPicker(config)
 	table.insert(self._connections, UserInputService.InputBegan:Connect(function(input)
 		if not expanded or not isPointer(input) then return end
 		local raw = Vector2.new(input.Position.X, input.Position.Y)
-		local inset = GuiService:GetGuiInset()
-		local pos, size = root.AbsolutePosition, root.AbsoluteSize
-		local function inside(p)
-			return p.X >= pos.X and p.X <= pos.X + size.X and p.Y >= pos.Y and p.Y <= pos.Y + size.Y
+		local inset = getGuiInset()
+		if not pointInGuiBounds(raw, root) and not pointInGuiBounds(raw + inset, root) then
+			setExpanded(false, true)
 		end
-		if not inside(raw) and not inside(raw + inset) then setExpanded(false, true) end
 	end))
 
 	win:_onLayout(function()
@@ -3037,7 +3296,10 @@ function Tab:AddColorPicker(config)
 		nameLabel.TextSize = m.Text
 		hexBox.TextSize = m.Text
 		local leftX = 14
-		if lead then lead:SetSize(m.Icon); leftX = 14 + m.Icon + 10 end
+		if lead then
+			local sz = iconSizeOf(lead, m.Icon)
+			lead:SetSize(sz); leftX = 14 + sz + 10
+		end
 		nameLabel.Position = UDim2.fromOffset(leftX, 0)
 		nameLabel.Size = UDim2.new(1, -leftX - 80, 1, 0)
 		chevron:SetSize(m.Icon - 2)
