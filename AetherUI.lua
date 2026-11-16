@@ -397,19 +397,42 @@ end
 
 -- Calibra o deslocamento entre InputObject.Position e GuiObject.AbsolutePosition
 -- (evita desvios causados por GuiInset / Topbar v2 / telas com notch no Mobile).
+local CalibratedTouchOffset = nil
+
 local function detectPointerOffset(input, refGui)
 	local raw = Vector2.new(input.Position.X, input.Position.Y)
 	local inset = getGuiInset()
-	local okMl, ml = pcall(function() return UserInputService:GetMouseLocation() end)
-	if okMl and typeof(ml) == "Vector2" then
-		if (ml - raw).Magnitude <= 6 then return Vector2.zero end
-		if inset.Magnitude > 0 and (ml - (raw + inset)).Magnitude <= 6 then return inset end
+	if inset.Magnitude < 1 then
+		if input.UserInputType == Enum.UserInputType.Touch then
+			CalibratedTouchOffset = Vector2.zero
+		end
+		return Vector2.zero
 	end
-	if refGui and inset.Magnitude > 0 then
+	local okMl, ml = pcall(function() return UserInputService:GetMouseLocation() end)
+	if okMl and typeof(ml) == "Vector2" and ml.Magnitude > 0 then
+		if (ml - raw).Magnitude <= 6 then
+			if input.UserInputType == Enum.UserInputType.Touch then CalibratedTouchOffset = Vector2.zero end
+			return Vector2.zero
+		end
+		if (ml - (raw + inset)).Magnitude <= 6 then
+			if input.UserInputType == Enum.UserInputType.Touch then CalibratedTouchOffset = inset end
+			return inset
+		end
+	end
+	if refGui then
 		local rawIn = pointInGuiBounds(raw, refGui)
 		local insetIn = pointInGuiBounds(raw + inset, refGui)
-		if rawIn and not insetIn then return Vector2.zero end
-		if insetIn and not rawIn then return inset end
+		if rawIn and not insetIn then
+			if input.UserInputType == Enum.UserInputType.Touch then CalibratedTouchOffset = Vector2.zero end
+			return Vector2.zero
+		end
+		if insetIn and not rawIn then
+			if input.UserInputType == Enum.UserInputType.Touch then CalibratedTouchOffset = inset end
+			return inset
+		end
+	end
+	if CalibratedTouchOffset ~= nil then
+		return CalibratedTouchOffset
 	end
 	return inset
 end
@@ -422,7 +445,7 @@ local function pointerPosition(input, forcedOffset)
 	end
 	if isMouseInput(input) then
 		local okMl, ml = pcall(function() return UserInputService:GetMouseLocation() end)
-		if okMl and typeof(ml) == "Vector2" then return ml end
+		if okMl and typeof(ml) == "Vector2" and ml.Magnitude > 0 then return ml end
 	end
 	return raw + detectPointerOffset(input, nil)
 end
@@ -1769,7 +1792,8 @@ function Tab:AddButton(config)
 	end)
 	button.InputBegan:Connect(function(input)
 		if not isPointer(input) then return end
-		local rel = pointerPosition(input) - button.AbsolutePosition
+		local off = detectPointerOffset(input, button)
+		local rel = pointerPosition(input, off) - button.AbsolutePosition
 		spawnRipple(button, UDim2.fromOffset(math.floor(rel.X), math.floor(rel.Y)),
 			accentLight(), math.max(button.AbsoluteSize.X, button.AbsoluteSize.Y) * 2)
 	end)
@@ -1972,6 +1996,9 @@ function Tab:AddToggle(config)
 		tween(glow, Anim.Normal, { BackgroundTransparency = state and 0.82 or 1 })
 	end)
 	row.MouseLeave:Connect(knobRest)
+	row.InputBegan:Connect(function(input)
+		if isPointer(input) then detectPointerOffset(input, row) end
+	end)
 	row.Activated:Connect(function() object:Set(not state) end)
 	return object
 end
@@ -2066,7 +2093,7 @@ function Tab:AddSlider(config)
 		Size = UDim2.new(1, 0, 0, m.Mobile and 42 or 34), Text = "",
 		AutoButtonColor = false, Active = true, ZIndex = 3, Parent = holder,
 	})
-	local dragging, activeInput, lockedOffset = false, nil, nil
+	local dragging, activeInput, lockedOffset, lastRawPos, lastMoveOffset = false, nil, nil, nil, nil
 	local function render(animate)
 		local alpha = 0
 		if max > min then alpha = (value - min) / (max - min) end
@@ -2121,7 +2148,9 @@ function Tab:AddSlider(config)
 	end
 	local function startDragging(input)
 		if dragging then return end
-		dragging = true; activeInput = input; lockedOffset = detectPointerOffset(input, hit)
+		dragging = true; activeInput = input
+		lockedOffset = detectPointerOffset(input, hit)
+		lastRawPos = nil; lastMoveOffset = nil
 		self._page.ScrollingEnabled = false
 		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(knobBase() + 4, knobBase() + 4) })
 		tween(knobRing, Anim.Fast, { Size = UDim2.fromOffset(knobBase() - 4, knobBase() - 4) })
@@ -2130,7 +2159,7 @@ function Tab:AddSlider(config)
 	end
 	local function stopDragging()
 		if not dragging then return end
-		dragging = false; activeInput = nil; lockedOffset = nil
+		dragging = false; activeInput = nil; lockedOffset = nil; lastRawPos = nil; lastMoveOffset = nil
 		self._page.ScrollingEnabled = true
 		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(knobBase(), knobBase()) })
 		tween(knobRing, Anim.Fast, { Size = UDim2.fromOffset(knobBase() - 8, knobBase() - 8) })
@@ -2148,6 +2177,20 @@ function Tab:AddSlider(config)
 		if not dragging then return end
 		if changed.UserInputType == Enum.UserInputType.MouseMovement
 			or (changed.UserInputType == Enum.UserInputType.Touch and (activeInput == nil or changed == activeInput)) then
+			local raw = Vector2.new(changed.Position.X, changed.Position.Y)
+			if changed.UserInputType == Enum.UserInputType.Touch then
+				local okMl, ml = pcall(function() return UserInputService:GetMouseLocation() end)
+				if okMl and typeof(ml) == "Vector2" and ml.Magnitude > 0 then
+					local inset = getGuiInset()
+					if (ml - raw).Magnitude <= 5 then
+						lockedOffset = Vector2.zero; CalibratedTouchOffset = Vector2.zero
+					elseif inset.Magnitude > 0 and (ml - (raw + inset)).Magnitude <= 5 then
+						lockedOffset = inset; CalibratedTouchOffset = inset
+					end
+				end
+			end
+			if lastRawPos == raw and lastMoveOffset == lockedOffset then return end
+			lastRawPos = raw; lastMoveOffset = lockedOffset
 			updateFromInput(changed)
 		end
 	end
@@ -2160,8 +2203,11 @@ function Tab:AddSlider(config)
 		moveConn = UserInputService.InputChanged:Connect(handleMove)
 		endConn = UserInputService.InputEnded:Connect(function(ended)
 			if not dragging then return end
-			local same = ended == activeInput or (activeInput and ended.UserInputType == Enum.UserInputType.MouseButton1
-				and activeInput.UserInputType == Enum.UserInputType.MouseButton1)
+			local same = ended == activeInput
+				or (activeInput and ended.UserInputType == Enum.UserInputType.MouseButton1
+					and activeInput.UserInputType == Enum.UserInputType.MouseButton1)
+				or (activeInput and ended.UserInputType == Enum.UserInputType.Touch
+					and activeInput.UserInputState == Enum.UserInputState.End)
 			if same or (not activeInput and isPointer(ended)) then
 				untrack()
 				stopDragging()
@@ -2982,7 +3028,7 @@ function Tab:AddColorPicker(config)
 	addCorner(svSquare, 8)
 	local satOverlay = create("Frame", {
 		Name = "Sat", Size = UDim2.fromScale(1, 1),
-		BackgroundColor3 = Theme.White, Parent = svSquare,
+		BackgroundColor3 = Theme.White, Active = false, Parent = svSquare,
 	})
 	addCorner(satOverlay, 8)
 	create("UIGradient", {
@@ -2993,7 +3039,7 @@ function Tab:AddColorPicker(config)
 	})
 	local valOverlay = create("Frame", {
 		Name = "Val", Size = UDim2.fromScale(1, 1),
-		BackgroundColor3 = Theme.Black, Parent = svSquare,
+		BackgroundColor3 = Theme.Black, Active = false, Parent = svSquare,
 	})
 	addCorner(valOverlay, 8)
 	create("UIGradient", {
@@ -3007,7 +3053,7 @@ function Tab:AddColorPicker(config)
 		Name = "Selector", AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(s, 1 - v),
 		Size = UDim2.fromOffset(selectorSize, selectorSize), BackgroundColor3 = current,
-		ZIndex = 5, Parent = svSquare,
+		Active = false, ZIndex = 5, Parent = svSquare,
 	})
 	addCornerScale(svSelector, 0.5)
 	create("UIStroke", {
@@ -3017,7 +3063,7 @@ function Tab:AddColorPicker(config)
 	local svHit = create("TextButton", {
 		Name = "Hit", BackgroundTransparency = 1,
 		Size = UDim2.fromScale(1, 1), Text = "",
-		AutoButtonColor = false, Active = true, ZIndex = 4, Parent = svSquare,
+		AutoButtonColor = false, Active = true, ZIndex = 6, Parent = svSquare,
 	})
 
 	local hueBar = create("Frame", {
@@ -3043,7 +3089,7 @@ function Tab:AddColorPicker(config)
 		Position = UDim2.new(0.5, 0, h, 0),
 		Size = UDim2.fromOffset(hueW + 2, hueW + 2),
 		BackgroundColor3 = Color3.fromHSV(h, 1, 1),
-		ZIndex = 5, Parent = hueBar,
+		Active = false, ZIndex = 5, Parent = hueBar,
 	})
 	addCornerScale(hueSelector, 0.5)
 	create("UIStroke", {
@@ -3054,7 +3100,7 @@ function Tab:AddColorPicker(config)
 	local hueHit = create("TextButton", {
 		Name = "Hit", BackgroundTransparency = 1,
 		Position = UDim2.fromOffset(-huePad, -huePad), Size = UDim2.new(1, huePad * 2, 1, huePad * 2),
-		Text = "", AutoButtonColor = false, Active = true, ZIndex = 4, Parent = hueBar,
+		Text = "", AutoButtonColor = false, Active = true, ZIndex = 6, Parent = hueBar,
 	})
 
 	-- Linha 2: preview + campo HEX (editavel)
@@ -3165,7 +3211,7 @@ function Tab:AddColorPicker(config)
 	function object:SetText(newText) nameLabel.Text = tostring(newText) end
 
 	-- Interacao por arraste com calibracao exata do espaco de tela (mouse e toque mobile)
-	local dragging, activeInput, dragOffset = nil, nil, nil
+	local dragging, activeInput, dragOffset, lastDragRaw, lastDragOffset = nil, nil, nil, nil, nil
 	local function localPoint(input, gui)
 		local p = pointerPosition(input, dragOffset)
 		local pos, size = gui.AbsolutePosition, gui.AbsoluteSize
@@ -3198,6 +3244,20 @@ function Tab:AddColorPicker(config)
 		if not dragging then return end
 		if changed.UserInputType == Enum.UserInputType.MouseMovement
 			or (changed.UserInputType == Enum.UserInputType.Touch and (activeInput == nil or changed == activeInput)) then
+			local raw = Vector2.new(changed.Position.X, changed.Position.Y)
+			if changed.UserInputType == Enum.UserInputType.Touch then
+				local okMl, ml = pcall(function() return UserInputService:GetMouseLocation() end)
+				if okMl and typeof(ml) == "Vector2" and ml.Magnitude > 0 then
+					local inset = getGuiInset()
+					if (ml - raw).Magnitude <= 5 then
+						dragOffset = Vector2.zero; CalibratedTouchOffset = Vector2.zero
+					elseif inset.Magnitude > 0 and (ml - (raw + inset)).Magnitude <= 5 then
+						dragOffset = inset; CalibratedTouchOffset = inset
+					end
+				end
+			end
+			if lastDragRaw == raw and lastDragOffset == dragOffset then return end
+			lastDragRaw = raw; lastDragOffset = dragOffset
 			updateDrag(changed)
 		end
 	end
@@ -3205,6 +3265,7 @@ function Tab:AddColorPicker(config)
 		if dragging then return end
 		dragging = kind; activeInput = input
 		dragOffset = detectPointerOffset(input, refGui)
+		lastDragRaw = nil; lastDragOffset = nil
 		self._page.ScrollingEnabled = false
 		updateDrag(input)
 		untrackDrag()
@@ -3214,15 +3275,18 @@ function Tab:AddColorPicker(config)
 		dragMoveConn = UserInputService.InputChanged:Connect(handleDragMove)
 		dragEndConn = UserInputService.InputEnded:Connect(function(ended)
 			if not dragging or not activeInput then return end
-			local same = ended == activeInput or (ended.UserInputType == Enum.UserInputType.MouseButton1
-				and activeInput.UserInputType == Enum.UserInputType.MouseButton1)
+			local same = ended == activeInput
+				or (ended.UserInputType == Enum.UserInputType.MouseButton1
+					and activeInput.UserInputType == Enum.UserInputType.MouseButton1)
+				or (ended.UserInputType == Enum.UserInputType.Touch
+					and activeInput.UserInputState == Enum.UserInputState.End)
 			if same then endDrag() end
 		end)
 	end
 	function endDrag()
 		untrackDrag()
 		if not dragging then return end
-		dragging = nil; activeInput = nil; dragOffset = nil
+		dragging = nil; activeInput = nil; dragOffset = nil; lastDragRaw = nil; lastDragOffset = nil
 		self._page.ScrollingEnabled = true
 	end
 	svHit.InputBegan:Connect(function(input)
@@ -3230,6 +3294,9 @@ function Tab:AddColorPicker(config)
 	end)
 	hueHit.InputBegan:Connect(function(input)
 		if isPointer(input) then beginDrag("hue", input, hueBar, hueHit) end
+	end)
+	header.InputBegan:Connect(function(input)
+		if isPointer(input) then detectPointerOffset(input, header) end
 	end)
 	table.insert(self._connections, { Disconnect = function() untrackDrag(); endDrag() end })
 
@@ -4413,6 +4480,9 @@ function Window:_createTab(label, iconSpec, isSettings, isFavorites, iconOpts)
 		tab._pressed = false
 		tween(buttonScale, Anim.Spring, { Scale = tab:_restScale() }, Enum.EasingStyle.Back)
 	end)
+	button.InputBegan:Connect(function(input)
+		if isPointer(input) then detectPointerOffset(input, button) end
+	end)
 	button.Activated:Connect(function() self:_selectTab(tab, true) end)
 	self:_onAccent(function(animate)
 		page.ScrollBarImageColor3 = accent()
@@ -5251,10 +5321,14 @@ function Window:_dockClamp(position, wide)
 	local viewport = getViewport()
 	local width = wide and self._dockWidth or self._dockSphereSize
 	local height = self._dockSphereSize
+	local minTop = 4
+	if self._metrics and self._metrics.Mobile then
+		minTop = math.min(math.max(10, getGuiInset().Y + 4), math.max(viewport.Y - height - 4, 10))
+	end
 	local cx = position.X.Scale * viewport.X + position.X.Offset
 	local top = position.Y.Scale * viewport.Y + position.Y.Offset
 	local nx = math.clamp(cx, math.min(width / 2 + 4, viewport.X / 2), math.max(viewport.X - width / 2 - 4, viewport.X / 2))
-	local ny = math.clamp(top, 4, math.max(viewport.Y - height - 4, 4))
+	local ny = math.clamp(top, minTop, math.max(viewport.Y - height - 4, minTop))
 	return UDim2.new(position.X.Scale, position.X.Offset + (nx - cx), position.Y.Scale, position.Y.Offset + (ny - top))
 end
 
@@ -5295,9 +5369,10 @@ function Window:_buildDock(config)
 	self._dockShowToken = 0
 
 	-- Dock comeca oculto; aparece apenas quando o painel principal esta minimizado.
+	local defaultDockY = mobile and math.max(14, getGuiInset().Y + 6) or 12
 	local dock = create("Frame", {
 		Name = "Dock", AnchorPoint = Vector2.new(0.5, 0),
-		Position = DockMemory.Position or UDim2.new(0.5, 0, 0, mobile and 14 or 12),
+		Position = DockMemory.Position or UDim2.new(0.5, 0, 0, defaultDockY),
 		Size = UDim2.fromOffset(width, sphereSize),
 		BackgroundTransparency = 1, Active = false, Visible = false,
 		ZIndex = 2, Parent = self._gui,
@@ -5928,7 +6003,8 @@ function AetherUI.CreateWindow(config)
 		end)
 		button.InputBegan:Connect(function(input)
 			if not isPointer(input) then return end
-			local rel = pointerPosition(input) - button.AbsolutePosition
+			local off = detectPointerOffset(input, button)
+			local rel = pointerPosition(input, off) - button.AbsolutePosition
 			spawnRipple(button, UDim2.fromOffset(math.floor(rel.X), math.floor(rel.Y)),
 				hoverIconColor, math.max(button.AbsoluteSize.X, 1) * 2.2)
 		end)
