@@ -5642,9 +5642,12 @@ function Window:_buildDock(config)
 		local isMove = input.UserInputType == Enum.UserInputType.MouseMovement
 			or (input.UserInputType == Enum.UserInputType.Touch and input == activeInput)
 		if not isMove then return end
-		local delta = Vector2.new(input.Position.X, input.Position.Y) - startPointer
+		local currentPos = Vector2.new(input.Position.X, input.Position.Y)
+		local totalDelta = currentPos - startPointer
+		local delta = currentPos - startPointer
+		local realDragThreshold = mobile and 18 or 10
 		if not moved then
-			if delta.Magnitude < dragThreshold then return end
+			if totalDelta.Magnitude < realDragThreshold then return end
 			moved = true
 			cancelHold()
 			setPressed(nil)
