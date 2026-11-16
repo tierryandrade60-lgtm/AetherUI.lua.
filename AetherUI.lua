@@ -5321,15 +5321,10 @@ function Window:_dockClamp(position, wide)
 	local viewport = getViewport()
 	local width = wide and self._dockWidth or self._dockSphereSize
 	local height = self._dockSphereSize
-	local minTop = 4
-	if self._metrics and self._metrics.Mobile then
-		minTop = math.min(math.max(10, getGuiInset().Y + 4), math.max(viewport.Y - height - 4, 10))
-	end
+	local topY = math.max(6, getGuiInset().Y + 2)
 	local cx = position.X.Scale * viewport.X + position.X.Offset
-	local top = position.Y.Scale * viewport.Y + position.Y.Offset
-	local nx = math.clamp(cx, math.min(width / 2 + 4, viewport.X / 2), math.max(viewport.X - width / 2 - 4, viewport.X / 2))
-	local ny = math.clamp(top, minTop, math.max(viewport.Y - height - 4, minTop))
-	return UDim2.new(position.X.Scale, position.X.Offset + (nx - cx), position.Y.Scale, position.Y.Offset + (ny - top))
+	local nx = math.clamp(cx, width / 2 + 8, viewport.X - width / 2 - 8)
+	return UDim2.new(0.5, nx - viewport.X / 2, 0, topY)
 end
 
 function Window:_dockReclamp()
