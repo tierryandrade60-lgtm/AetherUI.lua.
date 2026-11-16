@@ -5584,7 +5584,7 @@ function Window:_buildDock(config)
 
 	local onDockMoved, onDockEnded, trackDock, untrackDock
 
-	local function onBegan(input)
+	local function onBeganFrom(source, input)
 		if not isPointer(input) then return end
 		if dragging then
 			if activeInput and activeInput.UserInputState ~= Enum.UserInputState.End then return end
@@ -5593,11 +5593,13 @@ function Window:_buildDock(config)
 		dragging = true
 		moved = false
 		holdFired = false
+		startedOnSphere = source == "sphere"
 		activeInput = input
+		dockOffset = detectPointerOffset(input, startedOnSphere and sphere or pill)
 		trackDock()
 		startPointer = Vector2.new(input.Position.X, input.Position.Y)
 		startPosition = dock.Position
-		setPressed(findSlot(pointerPosition(input)))
+		setPressed(startedOnSphere and nil or findSlot(startPointer, dockOffset))
 		local token = {}
 		holdToken = token
 		if holdTween then holdTween:Cancel() end
@@ -5614,8 +5616,8 @@ function Window:_buildDock(config)
 		end)
 	end
 
-	sphere.InputBegan:Connect(onBegan)
-	pill.InputBegan:Connect(onBegan)
+	sphere.InputBegan:Connect(function(input) onBeganFrom("sphere", input) end)
+	pill.InputBegan:Connect(function(input) onBeganFrom("pill", input) end)
 
 	sphere.MouseEnter:Connect(function()
 		if not dragging then tween(sphereScale, Anim.Fast, { Scale = 1.06 }) end
@@ -5631,7 +5633,7 @@ function Window:_buildDock(config)
 		if not isMove then return end
 		local delta = Vector2.new(input.Position.X, input.Position.Y) - startPointer
 		if not moved then
-			if delta.Magnitude < 6 then return end
+			if delta.Magnitude < dragThreshold then return end
 			moved = true
 			cancelHold()
 			setPressed(nil)
