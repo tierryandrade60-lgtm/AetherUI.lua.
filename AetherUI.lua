@@ -5480,11 +5480,12 @@ function Window:_buildDock(config)
 		table.insert(slots, { Frame = frame, Icon = icon, Action = def.Action, Name = def.Icon })
 	end
 
-	local sphere = create("Frame", {
+	local sphere = create("TextButton", {
 		Name = "Sphere", AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
 		Size = UDim2.fromOffset(sphereSize, sphereSize),
 		BackgroundColor3 = Theme.Black, BackgroundTransparency = 0.12,
+		AutoButtonColor = false, Text = "",
 		Active = true, ZIndex = 5, Parent = dock,
 	})
 	addCornerScale(sphere, 0.5)
