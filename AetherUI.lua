@@ -6324,7 +6324,7 @@ function AetherUI.CreateWindow(config)
 	self:_applyLayout(false)
 	self:_applyPerformance()
 	self:_applyStarsMode(false)
-	if config.Dock ~= false then self:_buildDock(config) end
+	if config.Dock == true then self:_buildDock(config) end
 
 	-- Reposiciona as estrelas dos componentes (rolagem, expansao, resize).
 	-- Estrelas: Heartbeat so existe enquanto o modo estrela esta ativo (ou na
