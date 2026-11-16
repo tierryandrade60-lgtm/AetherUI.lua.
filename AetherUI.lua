@@ -5546,9 +5546,10 @@ function Window:_buildDock(config)
 		end
 	end
 
-	local dragging, moved, holdFired = false, false, false
-	local activeInput, holdToken, holdTween, pressedSlot = nil, nil, nil, nil
+	local dragging, moved, holdFired, startedOnSphere = false, false, false, false
+	local activeInput, holdToken, holdTween, pressedSlot, dockOffset = nil, nil, nil, nil, nil
 	local startPointer, startPosition = Vector2.zero, dock.Position
+	local dragThreshold = mobile and 12 or 6
 
 	local function slotRest(slot)
 		if slot.Name == "star" and self._starsOn then return accentLight() end
@@ -5568,10 +5569,18 @@ function Window:_buildDock(config)
 		end
 	end
 
-	local function findSlot(point)
+	local function findSlot(rawPoint, forcedOffset)
 		if not pillShown then return nil end
-		for _, slot in ipairs(slots) do
-			if pointInFrame(slot.Frame, point, 3) then return slot end
+		local pad = mobile and 6 or 3
+		local inset = getGuiInset()
+		local candidates = {}
+		if forcedOffset ~= nil then table.insert(candidates, rawPoint + forcedOffset) end
+		table.insert(candidates, rawPoint)
+		if inset.Magnitude > 0 then table.insert(candidates, rawPoint + inset) end
+		for _, pt in ipairs(candidates) do
+			for _, slot in ipairs(slots) do
+				if pointInFrame(slot.Frame, pt, pad) then return slot end
+			end
 		end
 		return nil
 	end
