@@ -5627,7 +5627,6 @@ function Window:_buildDock(config)
 	end
 
 	sphere.InputBegan:Connect(function(input) onBeganFrom("sphere", input) end)
-	sphere.Activated:Connect(function() self:_dockToggleWindow() end)
 	pill.InputBegan:Connect(function(input) onBeganFrom("pill", input) end)
 
 	sphere.MouseEnter:Connect(function()
