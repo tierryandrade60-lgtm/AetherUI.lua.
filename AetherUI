@@ -1,9 +1,22 @@
 --[[
-	AetherUI v2.3.0 - arquivo unico (Parte 1/3 + 2/3 + 3/3 ja unidas)
+	AetherUI v2.5.0 - arquivo unico (Parte 1/3 + 2/3 + 3/3 ja unidas)
 	Inclui: cabecalho, tema, estado, utilitarios, icones,
 	        notificacoes (DisplayOrder 990, abaixo da UI),
 	        Section e Label, componentes, janela, busca global.
 	Cole TODO este arquivo em um unico ModuleScript.
+
+	v2.5.0:
+	  - API padronizada estilo Rayfield (camada de compatibilidade sobre os Add*):
+	    Window:CreateTab, Tab:CreateSection/CreateLabel/CreateButton/CreateToggle/
+	    CreateSlider/CreateDropdown/CreateMultiDropdown/CreateColorPicker.
+	    Parametros: CurrentValue, Range, Increment, CurrentOption, MultipleOptions,
+	    Color, Flag. Parametros antigos (Default/Min/Max/Step) continuam validos.
+	  - AetherUI.Flags / Window.Flags; objetos com Type, Flag, CurrentValue,
+	    CurrentOption; Get/Set em todos; Refresh nos dropdowns.
+	  - Set(valor, silent) em Toggle/Slider/Dropdown/MultiDropdown/ColorPicker e
+	    Clear(silent): atualiza sem disparar o Callback.
+	  - IDs de imagem corrigidos (icone 113083945240866, luas 123147524256851).
+	  - Veja AetherUI_API.md.
 
 	v2.4.0:
 	  - Botao de estrela ao lado de minimizar: mostra/oculta estrelas em abas,
@@ -19,9 +32,9 @@
 		FavoritesTab, FavoriteButton.
 
 	v2.3.1:
-	  - Icone (120499602646584) ao lado do titulo e no botao flutuante (fundo preto,
+	  - Icone (113083945240866) ao lado do titulo e no botao flutuante (fundo preto,
 	    circular, icone + contorno sincronizados com a AccentColor).
-	  - Textura de luas (129483005856072) caindo em loop atras dos componentes,
+	  - Textura de luas (123147524256851) caindo em loop atras dos componentes,
 	    discretas e na cor da AccentColor (desligada no modo baixo desempenho).
 
 	v2.3.0:
@@ -41,7 +54,7 @@ local RunService = game:GetService("RunService")
 local GuiService = game:GetService("GuiService")
 
 local AetherUI = {}
-AetherUI.Version = "2.4.0"
+AetherUI.Version = "2.5.0"
 
 local Window = {}
 Window.__index = Window
@@ -97,8 +110,8 @@ local DefaultSwatches = {
 }
 
 local Assets = {
-	Logo = "rbxassetid://120499602646584",
-	Moon = "rbxassetid://129483005856072",
+	Logo = "rbxassetid://113083945240866",
+	Moon = "rbxassetid://123147524256851",
 }
 
 local STAR_GUTTER = 30 -- faixa lateral reservada para as estrelas dos componentes
@@ -1116,6 +1129,8 @@ function Tab:AddSection(config)
 		rawText = tostring(newText)
 		label.Text = string.upper(rawText)
 	end
+	function object:Set(newText) object:SetText(newText) end
+	function object:Get() return rawText end
 	return object
 end
 
@@ -1153,6 +1168,8 @@ function Tab:AddLabel(config)
 	end)
 	local object = { Instance = label }
 	function object:SetText(newText) label.Text = tostring(newText) end
+	function object:Set(newText) object:SetText(newText) end
+	function object:Get() return label.Text end
 	self:_register("Label", label, function() return label.Text end)
 	return object
 end
@@ -1250,6 +1267,8 @@ function Tab:AddButton(config)
 	end)
 	local object = { Instance = button }
 	function object:SetText(newText) button.Text = tostring(newText) end
+	function object:Set(newText) object:SetText(newText) end
+	function object:Get() return button.Text end
 	self:_register("Button", button, function() return button.Text end)
 	return object
 end
@@ -1392,7 +1411,7 @@ function Tab:AddToggle(config)
 	end)
 
 	local object = { Instance = row }
-	function object:Set(value)
+	function object:Set(value, silent)
 		value = value == true
 		if value == state then return end
 		state = value; render(true)
@@ -1410,7 +1429,7 @@ function Tab:AddToggle(config)
 			}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 			t.Completed:Connect(function() pulse:Destroy() end)
 		end
-		safeCall(config.Callback, state)
+		if not silent then safeCall(config.Callback, state) end
 	end
 	function object:Get() return state end
 	function object:SetText(newText) label.Text = tostring(newText) end
@@ -1565,11 +1584,12 @@ function Tab:AddSlider(config)
 		setProps(knobRingStroke, { Color = accent() }, animate, Anim.Normal)
 	end)
 	local object = { Instance = holder }
-	function object:Set(newValue)
+	function object:Set(newValue, silent)
+		if typeof(newValue) ~= "number" then return end
 		newValue = snap(newValue)
 		if newValue == value then return end
 		value = newValue; render(true)
-		safeCall(config.Callback, value)
+		if not silent then safeCall(config.Callback, value) end
 	end
 	function object:Get() return value end
 	self:_register("Slider", holder, function() return nameLabel.Text end)
@@ -1898,9 +1918,9 @@ function Tab:AddDropdown(config)
 		if not silent then safeCall(config.Callback, selected) end
 	end
 	function object:Get() return selected end
-	function object:Clear()
+	function object:Clear(silent)
 		selected = nil; paint()
-		safeCall(config.Callback, nil)
+		if not silent then safeCall(config.Callback, nil) end
 	end
 	function object:SetOptions(newOptions, silent)
 		if typeof(newOptions) ~= "table" then return end
@@ -2038,9 +2058,9 @@ function Tab:AddMultiDropdown(config)
 		paint()
 		safeCall(config.Callback, listSelected())
 	end
-	function object:Clear()
+	function object:Clear(silent)
 		selected = {}; paint()
-		safeCall(config.Callback, {})
+		if not silent then safeCall(config.Callback, {}) end
 	end
 	function object:SetOptions(newOptions, silent)
 		if typeof(newOptions) ~= "table" then return end
@@ -4489,10 +4509,279 @@ function AetherUI.CreateWindow(config)
 	return self
 end
 
+----------------------------------------------------------------
+-- API padronizada (estilo Rayfield) - camada de compatibilidade v2.5.0
+--
+-- Nada foi recriado: os Create* traduzem parametros e delegam aos Add*
+-- existentes, e os Add* continuam aceitando os parametros antigos
+-- (Default, Min, Max, Step...). Documentacao completa: AetherUI_API.md
+--
+-- Parametros (estilo Rayfield -> equivalente antigo):
+--   Toggle       Name, CurrentValue (Default), Flag, Callback(Value)
+--   Slider       Name, Range {min,max} (Min/Max), Increment (Step), Suffix,
+--                CurrentValue (Default), Flag, Callback(Value)
+--   Dropdown     Name, Options, CurrentOption (Default), MultipleOptions,
+--                Flag, Callback(tabela de opcoes)
+--   ColorPicker  Name, Color (Default), Flag, Callback(Color3)
+--   Button       Name, Callback
+--   Label        texto ou Name
+-- Se o parametro novo e o antigo forem informados, o novo tem prioridade.
+-- Parametros exclusivos da Rayfield (LoadingTitle, ConfigurationSaving,
+-- KeySystem, Theme...) sao ignorados.
+----------------------------------------------------------------
+AetherUI.Flags = {}
+
+local function copyConfig(config)
+	local copy = {}
+	if typeof(config) == "table" then
+		for key, value in pairs(config) do copy[key] = value end
+	end
+	return copy
+end
+
+-- Primeiro valor que nao seja nil (false e valido).
+local function pick(...)
+	for i = 1, select("#", ...) do
+		local value = select(i, ...)
+		if value ~= nil then return value end
+	end
+	return nil
+end
+
+local function toList(value)
+	if value == nil then return {} end
+	if typeof(value) == "table" then return value end
+	return { value }
+end
+
+-- Marca o objeto (Type, Flag), expoe propriedades "vivas" (CurrentValue,
+-- CurrentOption, Color...) lidas sempre do estado real e registra a Flag.
+local function decorate(tab, config, object, kind, live)
+	object.Type = kind
+	object.Flag = config.Flag
+	setmetatable(object, {
+		__index = function(_, key)
+			local getter = live and live[key]
+			if getter then return getter() end
+			return nil
+		end,
+	})
+	if config.Flag ~= nil then
+		local win = tab._window
+		win.Flags = win.Flags or {}
+		if win.Flags[config.Flag] ~= nil and win.Flags[config.Flag] ~= object then
+			warn("[AetherUI] Flag duplicada: " .. tostring(config.Flag) .. " (a anterior foi substituida)")
+		end
+		win.Flags[config.Flag] = object
+		AetherUI.Flags[config.Flag] = object
+	end
+	return object
+end
+
+local function asConfig(config)
+	-- Section/Label aceitam string; os demais, tabela.
+	if typeof(config) == "table" then return config end
+	return {}
+end
+
+-- Wrappers dos Add* (aditivos: mesmo comportamento + Type/Flag/CurrentValue)
+local rawAddSection = Tab.AddSection
+function Tab:AddSection(config)
+	return decorate(self, asConfig(config), rawAddSection(self, config), "Section", nil)
+end
+
+local rawAddLabel = Tab.AddLabel
+function Tab:AddLabel(config)
+	return decorate(self, asConfig(config), rawAddLabel(self, config), "Label", nil)
+end
+
+local rawAddButton = Tab.AddButton
+function Tab:AddButton(config)
+	return decorate(self, asConfig(config), rawAddButton(self, config), "Button", nil)
+end
+
+local rawAddToggle = Tab.AddToggle
+function Tab:AddToggle(config)
+	local object = rawAddToggle(self, config)
+	return decorate(self, asConfig(config), object, "Toggle", {
+		CurrentValue = function() return object:Get() end,
+	})
+end
+
+local rawAddSlider = Tab.AddSlider
+function Tab:AddSlider(config)
+	local object = rawAddSlider(self, config)
+	return decorate(self, asConfig(config), object, "Slider", {
+		CurrentValue = function() return object:Get() end,
+	})
+end
+
+-- Dropdown simples: Set aceita string ou tabela ({ "A" }); nil/{} limpa.
+local rawAddDropdown = Tab.AddDropdown
+function Tab:AddDropdown(config)
+	local object = rawAddDropdown(self, config)
+	local rawSet = object.Set
+	function object:Set(value, silent)
+		if typeof(value) == "table" then value = value[1] end
+		if value == nil then
+			if object:Get() ~= nil then object:Clear(silent) end
+			return
+		end
+		return rawSet(object, value, silent)
+	end
+	return decorate(self, asConfig(config), object, "Dropdown", {
+		CurrentValue = function() return object:Get() end,
+		CurrentOption = function()
+			local value = object:Get()
+			return value ~= nil and { value } or {}
+		end,
+	})
+end
+
+-- MultiDropdown: Set aceita tabela ou string unica.
+local rawAddMultiDropdown = Tab.AddMultiDropdown
+function Tab:AddMultiDropdown(config)
+	local object = rawAddMultiDropdown(self, config)
+	local rawSet = object.Set
+	function object:Set(values, silent)
+		return rawSet(object, toList(values), silent)
+	end
+	object.Multiple = true
+	return decorate(self, asConfig(config), object, "Dropdown", {
+		CurrentValue = function() return object:Get() end,
+		CurrentOption = function() return object:Get() end,
+	})
+end
+
+local rawAddColorPicker = Tab.AddColorPicker
+function Tab:AddColorPicker(config)
+	local object = rawAddColorPicker(self, config)
+	return decorate(self, asConfig(config), object, "ColorPicker", {
+		CurrentValue = function() return object:Get() end,
+		Color = function() return object:Get() end,
+		CurrentColor = function() return object:Get() end,
+	})
+end
+
+-- Window ---------------------------------------------------------
+local originalCreateWindow = AetherUI.CreateWindow
+
+function AetherUI.CreateWindow(config)
+	if typeof(config) == "string" then config = { Name = config } end
+	config = copyConfig(config)
+	-- Na Rayfield, Name e o titulo exibido na janela.
+	if config.Title == nil and config.Name ~= nil then config.Title = tostring(config.Name) end
+	local win = originalCreateWindow(config)
+	win.Flags = win.Flags or {}
+	return win
+end
+
+function Window:CreateTab(name, icon)
+	return self:AddTab(name, icon)
+end
+
+-- Tab:Create* ----------------------------------------------------
+function Tab:CreateSection(config, icon)
+	if typeof(config) == "table" then
+		config = copyConfig(config)
+		config.Text = pick(config.Text, config.Name)
+		config.Icon = pick(config.Icon, icon)
+	elseif icon ~= nil then
+		config = { Text = config, Icon = icon }
+	end
+	return self:AddSection(config)
+end
+
+function Tab:CreateLabel(config, icon)
+	if typeof(config) == "table" then
+		config = copyConfig(config)
+		config.Text = pick(config.Text, config.Name)
+		config.Icon = pick(config.Icon, icon)
+	else
+		config = { Text = config, Icon = icon }
+	end
+	return self:AddLabel(config)
+end
+
+function Tab:CreateButton(config)
+	config = copyConfig(config)
+	config.Name = pick(config.Name, "Button")
+	return self:AddButton(config)
+end
+
+function Tab:CreateToggle(config)
+	config = copyConfig(config)
+	config.Name = pick(config.Name, "Toggle")
+	config.Default = pick(config.CurrentValue, config.Default) == true
+	return self:AddToggle(config)
+end
+
+function Tab:CreateSlider(config)
+	config = copyConfig(config)
+	config.Name = pick(config.Name, "Slider")
+	local range = config.Range
+	if typeof(range) == "table" then
+		config.Min = pick(range[1], config.Min)
+		config.Max = pick(range[2], config.Max)
+	end
+	config.Step = pick(config.Increment, config.Step)
+	config.Default = pick(config.CurrentValue, config.Default)
+	return self:AddSlider(config)
+end
+
+-- Estilo Rayfield: o Callback recebe SEMPRE uma tabela de opcoes
+-- (simples: { "A" } ou {}; multiplo: lista). Os Add* seguem como antes.
+function Tab:CreateDropdown(config)
+	config = copyConfig(config)
+	config.Name = pick(config.Name, "Dropdown")
+	local current = pick(config.CurrentOption, config.Default)
+	if config.MultipleOptions == true then
+		config.Default = toList(current)
+		return self:AddMultiDropdown(config)
+	end
+	if typeof(current) == "table" then current = current[1] end
+	config.Default = current
+	local user = config.Callback
+	config.Callback = function(value)
+		safeCall(user, value ~= nil and { value } or {})
+	end
+	return self:AddDropdown(config)
+end
+
+function Tab:CreateMultiDropdown(config)
+	config = copyConfig(config)
+	config.MultipleOptions = true
+	return self:CreateDropdown(config)
+end
+
+function Tab:CreateColorPicker(config)
+	config = copyConfig(config)
+	config.Name = pick(config.Name, "Color Picker")
+	config.Default = pick(config.Color, config.Default)
+	return self:AddColorPicker(config)
+end
+
 return AetherUI
 
 --[=[
 	EXEMPLO DE USO (LocalScript)
+
+	-- API padronizada (v2.5.0, estilo Rayfield) - mais exemplos em AetherUI_Examples.lua
+	local win = AetherUI.CreateWindow({ Name = "Meu Hub" })
+	local tab = win:CreateTab("Principal", "home")
+	tab:CreateSection("Controles")
+	tab:CreateToggle({ Name = "Ativar", CurrentValue = false, Flag = "Ativar", Callback = function(v) end })
+	tab:CreateSlider({ Name = "Velocidade", Range = { 0, 100 }, Increment = 5, Suffix = " km/h",
+		CurrentValue = 50, Flag = "Vel", Callback = function(v) end })
+	tab:CreateDropdown({ Name = "Arma", Options = { "Sword", "Bow" }, CurrentOption = { "Sword" },
+		Flag = "Arma", Callback = function(opcoes) print(opcoes[1]) end })
+	tab:CreateMultiDropdown({ Name = "Modulos", Options = { "ESP", "Fly" }, CurrentOption = { "ESP" },
+		Callback = function(lista) end })
+	tab:CreateColorPicker({ Name = "Cor", Color = Color3.fromRGB(124, 92, 255), Flag = "Cor",
+		Callback = function(c) end })
+	-- AetherUI.Flags.Vel.CurrentValue / :Set(valor, true) (true = sem disparar Callback)
+
+	-- API classica (continua valida):
 
 	local ReplicatedStorage = game:GetService("ReplicatedStorage")
 	local AetherUI = require(ReplicatedStorage:WaitForChild("AetherUI"))
