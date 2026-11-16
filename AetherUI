@@ -1,66 +1,35 @@
 --[[
-	AetherUI v2.5.0 - arquivo unico (Parte 1/3 + 2/3 + 3/3 ja unidas)
-	Inclui: cabecalho, tema, estado, utilitarios, icones,
+	AetherUI v2.7.0 - arquivo unico (Parte 1/3 + 2/3 + 3/3 ja unidas)
+	Inclui: cabecalho, tema, estado, utilitarios, biblioteca expandida de icones,
 	        notificacoes (DisplayOrder 990, abaixo da UI),
-	        Section e Label, componentes, janela, busca global.
-	Cole TODO este arquivo em um unico ModuleScript.
+	        Section, Label, Button, Toggle, Slider, Dropdown, MultiDropdown,
+	        RadioGroup, ColorPicker, Search global, Favoritos e Save Configuration.
+	Cole TODO este arquivo em um unico ModuleScript ou carregue via loadstring.
+
+	v2.7.0 (Mobile + Dock + ColorPicker + RadioGroup + Save Config + Icones):
+	  - Floating Dock: aparece SOMENTE quando o painel principal esta minimizado;
+	    ao abrir/restaurar o painel o Dock desaparece; ao minimizar reaparece.
+	    Atalhos da pilula restauram a janela e executam a acao ao tocar.
+	  - Mobile & Toque: deteccao aprimorada, viewport responsivo retrato/paisagem,
+	    clamping seguro abaixo do topbar e alvos de toque confortaveis.
+	  - ColorPicker: calibragem inteligente de coordenadas (Mouse/Touch/GuiInset/
+	    Topbar v2) e hitboxes Active=true, eliminando deslocamentos do dedo.
+	  - RadioGroup: Tab:AddRadioGroup / Tab:CreateRadioGroup com Get, Set, Clear,
+	    SetOptions/Refresh, Flag, Busca global e Favoritos.
+	  - Save Configuration: ExportConfig/ImportConfig (JSON universal) e
+	    SaveConfig/LoadConfig/DeleteConfig/ListConfigs (+ aliases *Configuration,
+	    ConfigurationSaving em CreateWindow e secao na aba Interface).
+	  - Biblioteca de Icones expandida (65+ icones vetoriais + aliases), suporte a
+	    IconSize/IconColor/tabela/imagens personalizadas e AetherUI.RegisterIcon,
+	    AetherUI.CreateIcon, AetherUI.GetIcons e AetherUI.Icons.
 
 	v2.6.0 (otimizacao profunda + correcao da bolinha):
-	  - Animador central: cache de TweenInfo, 1 tween ativo por propriedade
-		(sem duplicados), mescla de tweens concorrentes, animacoes de elementos
-		invisiveis/minimizados viram atribuicao direta (custo zero).
-	  - Minimizar/Restaurar reescritos: maquina de estados por tokens e timers,
-		sem depender de Tween.Completed (que era cancelado por tweens
-		concorrentes e travava o estado em Minimizing/Restoring). Tocar na
-		bolinha durante a animacao agora reverte, nunca trava.
-	  - Heartbeats sob demanda: luas (30 Hz adaptativo, 20 Hz se o FPS cair) e
-		estrelas so rodam com a janela visivel; desconectam ao minimizar.
-	  - Listeners globais de arraste (InputChanged/InputEnded) so existem
-		durante o gesto (antes: 1 por slider/seletor, sempre ligados).
-	  - Sombras: atualizacao coalescida (1x por frame) e sem reescrita redundante.
-	  - Slider: arraste sem tweens por evento (acompanha o dedo direto).
-	  - Microanimacoes: knob do toggle com compensacao de posicao, brilho no
-		toque, guardas contra flashes cancelados.
+	  - Animador central, maquina de estados por tokens/timers, Heartbeats sob
+	    demanda, listeners de arraste sob demanda e shadows coalescidas.
 
 	v2.5.0:
-	  - API padronizada estilo Rayfield (camada de compatibilidade sobre os Add*):
-	    Window:CreateTab, Tab:CreateSection/CreateLabel/CreateButton/CreateToggle/
-	    CreateSlider/CreateDropdown/CreateMultiDropdown/CreateColorPicker.
-	    Parametros: CurrentValue, Range, Increment, CurrentOption, MultipleOptions,
-	    Color, Flag. Parametros antigos (Default/Min/Max/Step) continuam validos.
-	  - AetherUI.Flags / Window.Flags; objetos com Type, Flag, CurrentValue,
-	    CurrentOption; Get/Set em todos; Refresh nos dropdowns.
-	  - Set(valor, silent) em Toggle/Slider/Dropdown/MultiDropdown/ColorPicker e
-	    Clear(silent): atualiza sem disparar o Callback.
-	  - IDs de imagem corrigidos (icone 113083945240866, luas 123147524256851).
-	  - Veja AetherUI_API.md.
-
-	v2.4.0:
-	  - Botao de estrela ao lado de minimizar: mostra/oculta estrelas em abas,
-		secoes e componentes para favoritar/desfavoritar individualmente
-		(ocultar NAO apaga os favoritos).
-	  - Aba exclusiva "Favoritos" para acessar os itens salvos.
-	  - Abas: selecionada levemente maior (escala + cor suaves) e indicador
-		deslizante com leve alongamento.
-	  - Microanimacoes: botoes, toggles, sliders, dropdowns, notificacoes, modal.
-	  - Nova API (opcional): Window:SetFavoritesVisible/GetFavoritesVisible/
-		ToggleFavoritesMode/GetFavorites/SetFavorites/ClearFavorites/IsFavorite
-		e config: Favorites, ShowFavoriteStars, OnFavoritesChanged,
-		FavoritesTab, FavoriteButton.
-
-	v2.3.1:
-	  - Icone (113083945240866) ao lado do titulo e no botao flutuante (fundo preto,
-	    circular, icone + contorno sincronizados com a AccentColor).
-	  - Textura de luas (123147524256851) caindo em loop atras dos componentes,
-	    discretas e na cor da AccentColor (desligada no modo baixo desempenho).
-
-	v2.3.0:
-	  - ColorPicker: sem faixas RGB; seletor circular + tonalidades ao lado,
-	    tons, presets e campo HEX. Interacao corrigida (mouse e toque).
-	  - Search: acima das abas, indexa abas/secoes/componentes/opcoes e leva
-	    direto ao elemento (resultados clicaveis, instantaneos).
-	  - Dropdown/MultiDropdown: abrir/fechar/clique fora/um aberto por vez,
-	    mobile e PC, SetOptions/Refresh, Open/Close/Toggle/IsOpen.
+	  - API padronizada estilo Rayfield (CreateWindow/CreateTab/Create*) +
+	    AetherUI.Flags / Window.Flags + Set(valor, silent) + Refresh.
 ]]
 
 local TweenService = game:GetService("TweenService")
@@ -69,9 +38,10 @@ local TextService = game:GetService("TextService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local GuiService = game:GetService("GuiService")
+local HttpService = game:GetService("HttpService")
 
 local AetherUI = {}
-AetherUI.Version = "2.6.0"
+AetherUI.Version = "2.7.0"
 
 local Window = {}
 Window.__index = Window
@@ -405,11 +375,56 @@ local function isPointer(input)
 		or input.UserInputType == Enum.UserInputType.Touch
 end
 
--- Posicao do ponteiro no MESMO espaco de AbsolutePosition. Como as ScreenGuis
--- usam IgnoreGuiInset = true, soma-se o inset da barra superior.
-local function pointerPosition(input)
-	local inset = GuiService:GetGuiInset()
-	return Vector2.new(input.Position.X + inset.X, input.Position.Y + inset.Y)
+local function getGuiInset()
+	local ok, topLeft = pcall(function() return GuiService:GetGuiInset() end)
+	if ok and typeof(topLeft) == "Vector2" then return topLeft end
+	return Vector2.zero
+end
+
+local function isMouseInput(input)
+	local t = input.UserInputType
+	return t == Enum.UserInputType.MouseButton1
+		or t == Enum.UserInputType.MouseButton2
+		or t == Enum.UserInputType.MouseMovement
+end
+
+local function pointInGuiBounds(point, gui)
+	if not gui then return false end
+	local pos, size = gui.AbsolutePosition, gui.AbsoluteSize
+	return point.X >= pos.X and point.X <= pos.X + size.X
+		and point.Y >= pos.Y and point.Y <= pos.Y + size.Y
+end
+
+-- Calibra o deslocamento entre InputObject.Position e GuiObject.AbsolutePosition
+-- (evita desvios causados por GuiInset / Topbar v2 / telas com notch no Mobile).
+local function detectPointerOffset(input, refGui)
+	local raw = Vector2.new(input.Position.X, input.Position.Y)
+	local inset = getGuiInset()
+	local okMl, ml = pcall(function() return UserInputService:GetMouseLocation() end)
+	if okMl and typeof(ml) == "Vector2" then
+		if (ml - raw).Magnitude <= 6 then return Vector2.zero end
+		if inset.Magnitude > 0 and (ml - (raw + inset)).Magnitude <= 6 then return inset end
+	end
+	if refGui and inset.Magnitude > 0 then
+		local rawIn = pointInGuiBounds(raw, refGui)
+		local insetIn = pointInGuiBounds(raw + inset, refGui)
+		if rawIn and not insetIn then return Vector2.zero end
+		if insetIn and not rawIn then return inset end
+	end
+	return inset
+end
+
+-- Posicao do ponteiro exatamente no mesmo espaco de AbsolutePosition (IgnoreGuiInset = true).
+local function pointerPosition(input, forcedOffset)
+	local raw = Vector2.new(input.Position.X, input.Position.Y)
+	if forcedOffset ~= nil then
+		return raw + forcedOffset
+	end
+	if isMouseInput(input) then
+		local okMl, ml = pcall(function() return UserInputService:GetMouseLocation() end)
+		if okMl and typeof(ml) == "Vector2" then return ml end
+	end
+	return raw + detectPointerOffset(input, nil)
 end
 
 -- Normaliza texto para busca: minusculas e sem acentos.
@@ -446,7 +461,9 @@ local function getViewport()
 end
 
 local function isMobile()
-	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+	if not UserInputService.TouchEnabled then return false end
+	if not UserInputService.KeyboardEnabled then return true end
+	return getViewport().X <= 760
 end
 
 local function computeMetrics(compact)
@@ -455,35 +472,42 @@ local function computeMetrics(compact)
 	local m = {}
 	m.Mobile = mobile
 	m.Compact = c
-	m.Row = c and (mobile and 38 or 34) or (mobile and 46 or 40)
-	m.Title = c and (mobile and 40 or 36) or (mobile and 48 or 44)
+	m.Row = c and (mobile and 40 or 34) or (mobile and 48 or 40)
+	m.Title = c and (mobile and 42 or 36) or (mobile and 50 or 44)
 	m.Text = c and (mobile and 13 or 12) or (mobile and 15 or 14)
 	m.Ball = c and (mobile and 48 or 42) or (mobile and 58 or 50)
-	m.TitleButton = c and (mobile and 30 or 26) or (mobile and 34 or 30)
+	m.TitleButton = c and (mobile and 32 or 26) or (mobile and 36 or 30)
 	m.Icon = c and 13 or (mobile and 17 or 16)
-	m.SideRow = c and (mobile and 38 or 34) or (mobile and 44 or 40)
-	m.SideWidth = c and (mobile and 112 or 118) or (mobile and 130 or 152)
+	m.SideRow = c and (mobile and 40 or 34) or (mobile and 46 or 40)
+	m.SideWidth = c and (mobile and 116 or 118) or (mobile and 136 or 152)
 	m.SidePad = 8
 	m.SideGap = c and 3 or 4
 	m.Pad = c and 10 or 12
 	m.Gap = c and 7 or 9
 	m.Header = c and 26 or 30
-	m.SwitchW = c and 38 or 44
-	m.SwitchH = c and 22 or 26
-	m.Swatch = c and 22 or 26
+	m.SwitchW = c and (mobile and 42 or 38) or (mobile and 48 or 44)
+	m.SwitchH = c and (mobile and 24 or 22) or (mobile and 28 or 26)
+	m.Swatch = c and 24 or (mobile and 28 or 26)
 	return m
 end
 
 local function getWindowSize(m)
 	local viewport = getViewport()
+	local inset = getGuiInset()
 	local width, height
 	if m.Mobile then
-		if m.Compact then
-			width = math.clamp(math.floor(viewport.X * 0.5), 280, 380)
-			height = math.clamp(math.floor(viewport.Y * 0.72), 200, 300)
+		local portrait = viewport.X < viewport.Y
+		if portrait then
+			width = math.clamp(math.floor(viewport.X * 0.92), 290, 440)
+			height = math.clamp(math.floor(viewport.Y * (m.Compact and 0.56 or 0.64)), 280, 520)
 		else
-			width = math.clamp(math.floor(viewport.X * 0.6), 300, 460)
-			height = math.clamp(math.floor(viewport.Y * 0.8), 220, 340)
+			if m.Compact then
+				width = math.clamp(math.floor(viewport.X * 0.58), 300, 420)
+				height = math.clamp(math.floor(viewport.Y * 0.76), 220, 320)
+			else
+				width = math.clamp(math.floor(viewport.X * 0.68), 340, 500)
+				height = math.clamp(math.floor(viewport.Y * 0.82), 240, 360)
+			end
 		end
 	else
 		if m.Compact then
@@ -495,7 +519,7 @@ local function getWindowSize(m)
 		end
 	end
 	width = math.min(width, math.max(math.floor(viewport.X) - 12, 200))
-	height = math.min(height, math.max(math.floor(viewport.Y) - 12, 180))
+	height = math.min(height, math.max(math.floor(viewport.Y - inset.Y) - 12, 180))
 	return UDim2.fromOffset(width, height)
 end
 
@@ -520,12 +544,15 @@ end
 
 local function clampWindowPosition(position, size)
 	local viewport = getViewport()
+	local insetTop = getGuiInset().Y
 	local halfW = size.X.Offset / 2
 	local halfH = size.Y.Offset / 2
+	local minY = math.min(halfH + insetTop + 4, viewport.Y / 2)
+	local maxY = math.max(viewport.Y - halfH - 4, minY)
 	local cx = position.X.Scale * viewport.X + position.X.Offset
 	local cy = position.Y.Scale * viewport.Y + position.Y.Offset
 	local nx = math.clamp(cx, math.min(halfW, viewport.X / 2), math.max(viewport.X - halfW, viewport.X / 2))
-	local ny = math.clamp(cy, math.min(halfH, viewport.Y / 2), math.max(viewport.Y - halfH, viewport.Y / 2))
+	local ny = math.clamp(cy, minY, maxY)
 	return UDim2.new(position.X.Scale, position.X.Offset + (nx - cx),
 		position.Y.Scale, position.Y.Offset + (ny - cy))
 end
@@ -702,6 +729,183 @@ local IconShapes = {
 IconShapes["chevron-right"] = { shapeLine(6, 3, 11, 8), shapeLine(11, 8, 6, 13) }
 IconShapes["chevron-left"] = { shapeLine(10, 3, 5, 8), shapeLine(5, 8, 10, 13) }
 IconShapes["chevron-down"] = { shapeLine(3, 6, 8, 11), shapeLine(8, 11, 13, 6) }
+IconShapes["chevron-up"] = { shapeLine(3, 10, 8, 5), shapeLine(8, 5, 13, 10) }
+
+-- Biblioteca expandida de icones vetoriais (v2.7.0)
+IconShapes["arrow-right"] = { shapeLine(2.5, 8, 13, 8), shapeLine(9, 4, 13.5, 8), shapeLine(13.5, 8, 9, 12) }
+IconShapes["arrow-left"] = { shapeLine(13.5, 8, 3, 8), shapeLine(7, 4, 2.5, 8), shapeLine(2.5, 8, 7, 12) }
+IconShapes["arrow-up"] = { shapeLine(8, 13.5, 8, 3), shapeLine(4, 7, 8, 2.5), shapeLine(8, 2.5, 12, 7) }
+IconShapes["arrow-down"] = { shapeLine(8, 2.5, 8, 13), shapeLine(4, 9, 8, 13.5), shapeLine(8, 13.5, 12, 9) }
+IconShapes.plus = { shapeLine(8, 3, 8, 13), shapeLine(3, 8, 13, 8) }
+IconShapes.circle = { shapeBox(2, 2, 12, 12, 6) }
+IconShapes.dot = { shapeDot(8, 8, 6) }
+IconShapes.radio = { shapeBox(2, 2, 12, 12, 6), shapeDot(8, 8, 5) }
+IconShapes.save = {
+	shapeBox(2, 2, 12, 12, 2), shapeBox(4.5, 2, 6, 4.5, 0.8), shapeBox(4, 9, 8, 5, 1),
+}
+IconShapes.folder = {
+	shapeBox(1.8, 3.5, 12.4, 10, 1.8), shapeLine(2.2, 3.5, 6.8, 3.5), shapeLine(6.8, 3.5, 8, 5.2),
+}
+IconShapes.file = {
+	shapeBox(3, 1.8, 10, 12.4, 1.6), shapeLine(5.5, 6, 10.5, 6), shapeLine(5.5, 9, 10.5, 9), shapeLine(5.5, 12, 8.5, 12),
+}
+IconShapes.download = {
+	shapeLine(8, 2, 8, 10.5), shapeLine(4.8, 7.5, 8, 10.8), shapeLine(8, 10.8, 11.2, 7.5),
+	shapeLine(2.5, 13.5, 13.5, 13.5),
+}
+IconShapes.upload = {
+	shapeLine(8, 10.8, 8, 2.5), shapeLine(4.8, 5.8, 8, 2.5), shapeLine(8, 2.5, 11.2, 5.8),
+	shapeLine(2.5, 13.5, 13.5, 13.5),
+}
+IconShapes.trash = {
+	shapeLine(2.5, 4, 13.5, 4), shapeLine(6, 2.2, 10, 2.2),
+	shapeBox(3.8, 4, 8.4, 10, 1.4), shapeLine(6.5, 6.5, 6.5, 11.5), shapeLine(9.5, 6.5, 9.5, 11.5),
+}
+IconShapes.edit = {
+	shapeLine(3, 13, 11.5, 4.5), shapeLine(9.8, 2.8, 13.2, 6.2), shapeLine(2.5, 13.5, 5.2, 13.5),
+}
+IconShapes.copy = { shapeBox(5.5, 5.5, 8.5, 8.5, 1.8), shapeBox(2, 2, 8.5, 8.5, 1.8) }
+IconShapes.refresh = {
+	shapeBox(2.5, 2.5, 11, 11, 5.5), shapeLine(11, 2.5, 13.5, 5), shapeLine(13.5, 2.5, 13.5, 5.5),
+}
+IconShapes.play = shapePoly({ { 4.5, 2.5 }, { 13, 8 }, { 4.5, 13.5 } }, true)
+IconShapes.pause = { shapeLine(5.5, 3, 5.5, 13), shapeLine(10.5, 3, 10.5, 13) }
+IconShapes.stop = { shapeBox(3, 3, 10, 10, 1.6) }
+IconShapes.lock = { shapeBox(3, 7, 10, 7, 1.8), shapeBox(5, 2.2, 6, 5, 3), shapeDot(8, 10.5, 2) }
+IconShapes.unlock = { shapeBox(3, 7, 10, 7, 1.8), shapeLine(5, 7, 5, 4), shapeLine(5, 4, 8, 2.5), shapeDot(8, 10.5, 2) }
+IconShapes.key = { shapeBox(2, 5, 6, 6, 3), shapeLine(8, 8, 14, 8), shapeLine(11.5, 8, 11.5, 11), shapeLine(14, 8, 14, 11) }
+IconShapes.globe = {
+	shapeBox(2, 2, 12, 12, 6), shapeLine(2, 8, 14, 8), shapeLine(8, 2, 8, 14),
+}
+IconShapes.compass = {
+	shapeBox(2, 2, 12, 12, 6), shapePoly({ { 10.5, 5.5 }, { 9, 9 }, { 5.5, 10.5 }, { 7, 7 } }, true),
+}
+IconShapes.map = shapePoly({ { 2, 3.5 }, { 6, 2 }, { 10, 4 }, { 14, 2.5 }, { 14, 12.5 }, { 10, 14 }, { 6, 12 }, { 2, 13.5 } }, true)
+IconShapes.pin = { shapeBox(4, 2, 8, 8, 4), shapeDot(8, 6, 2.4), shapeLine(8, 10, 8, 14.5) }
+IconShapes.crosshair = {
+	shapeBox(2.5, 2.5, 11, 11, 5.5),
+	shapeLine(8, 1, 8, 4.5), shapeLine(8, 11.5, 8, 15),
+	shapeLine(1, 8, 4.5, 8), shapeLine(11.5, 8, 15, 8),
+	shapeDot(8, 8, 2),
+}
+IconShapes.flame = shapePoly({ { 8, 1.8 }, { 12.5, 7 }, { 11.5, 12.2 }, { 8, 14.2 }, { 4.5, 12.2 }, { 3.5, 7 } }, true)
+IconShapes.sparkles = {
+	shapeLine(8, 2, 8, 10), shapeLine(4, 6, 12, 6),
+	shapeLine(12.5, 10, 12.5, 14), shapeLine(10.5, 12, 14.5, 12),
+	shapeDot(3.5, 12, 2),
+}
+IconShapes.crown = shapePoly({ { 2, 12 }, { 2, 5 }, { 5.5, 8.5 }, { 8, 3.5 }, { 10.5, 8.5 }, { 14, 5 }, { 14, 12 } }, true)
+IconShapes.gem = shapePoly({ { 5, 2.5 }, { 11, 2.5 }, { 14, 6.5 }, { 8, 14 }, { 2, 6.5 } }, true)
+IconShapes.trophy = {
+	shapeBox(4, 2.5, 8, 6.5, 2), shapeLine(8, 9, 8, 13), shapeLine(5, 13.5, 11, 13.5),
+	shapeLine(2.2, 4, 4, 4), shapeLine(12, 4, 13.8, 4),
+}
+IconShapes.heart = shapePoly({ { 8, 13.8 }, { 2.4, 8 }, { 2.4, 4.8 }, { 5.2, 3 }, { 8, 5.5 }, { 10.8, 3 }, { 13.6, 4.8 }, { 13.6, 8 } }, true)
+IconShapes.moon = shapePoly({ { 11.5, 2.5 }, { 7.5, 4.5 }, { 7, 8 }, { 8.5, 11.5 }, { 12.5, 13 }, { 7, 14 }, { 3.5, 10.5 }, { 3.5, 5.5 }, { 7, 2.2 } }, true)
+IconShapes.sun = {
+	shapeBox(4.8, 4.8, 6.4, 6.4, 3.2),
+	shapeLine(8, 1.5, 8, 3.2), shapeLine(8, 12.8, 8, 14.5),
+	shapeLine(1.5, 8, 3.2, 8), shapeLine(12.8, 8, 14.5, 8),
+	shapeLine(3.4, 3.4, 4.6, 4.6), shapeLine(11.4, 11.4, 12.6, 12.6),
+}
+IconShapes.cloud = { shapeBox(2, 6, 12, 7.5, 3.7), shapeBox(5, 3.2, 6.5, 5.5, 2.7) }
+IconShapes.wifi = {
+	shapeDot(8, 12.8, 2.4), shapeLine(5.5, 10, 10.5, 10),
+	shapeLine(3.5, 7, 12.5, 7), shapeLine(1.8, 4, 14.2, 4),
+}
+IconShapes.cpu = {
+	shapeBox(4, 4, 8, 8, 1.6), shapeBox(6.4, 6.4, 3.2, 3.2, 0.8),
+	shapeLine(6, 1.8, 6, 4), shapeLine(10, 1.8, 10, 4),
+	shapeLine(6, 12, 6, 14.2), shapeLine(10, 12, 10, 14.2),
+	shapeLine(1.8, 6, 4, 6), shapeLine(12, 6, 14.2, 6),
+}
+IconShapes.terminal = {
+	shapeBox(1.8, 2.5, 12.4, 11, 2),
+	shapeLine(4.5, 6, 7.5, 8), shapeLine(7.5, 8, 4.5, 10), shapeLine(8.5, 10.5, 11.5, 10.5),
+}
+IconShapes.code = {
+	shapeLine(5.5, 4.5, 2, 8), shapeLine(2, 8, 5.5, 11.5),
+	shapeLine(10.5, 4.5, 14, 8), shapeLine(14, 8, 10.5, 11.5),
+	shapeLine(9, 3, 7, 13),
+}
+IconShapes.layers = {
+	shapeLine(8, 2.2, 14, 5.5), shapeLine(14, 5.5, 8, 8.8), shapeLine(8, 8.8, 2, 5.5), shapeLine(2, 5.5, 8, 2.2),
+	shapeLine(2.5, 8.8, 8, 11.8), shapeLine(8, 11.8, 13.5, 8.8),
+	shapeLine(2.5, 11.5, 8, 14.2), shapeLine(8, 14.2, 13.5, 11.5),
+}
+IconShapes.sliders = IconShapes.settings
+IconShapes.filter = shapePoly({ { 2, 3 }, { 14, 3 }, { 9.5, 8.5 }, { 9.5, 13.5 }, { 6.5, 12 }, { 6.5, 8.5 } }, true)
+IconShapes.bookmark = shapePoly({ { 4, 2 }, { 12, 2 }, { 12, 14 }, { 8, 10.8 }, { 4, 14 } }, true)
+IconShapes.tag = mergeShapes(
+	shapePoly({ { 2, 8 }, { 2, 2 }, { 8, 2 }, { 14, 8 }, { 8, 14 } }, true),
+	{ shapeDot(5.4, 5.4, 2) }
+)
+IconShapes.clock = { shapeBox(2, 2, 12, 12, 6), shapeLine(8, 4.5, 8, 8), shapeLine(8, 8, 11, 9.8) }
+IconShapes.calendar = {
+	shapeBox(2, 3.2, 12, 10.8, 1.8), shapeLine(2, 6.8, 14, 6.8),
+	shapeLine(5.5, 1.8, 5.5, 4), shapeLine(10.5, 1.8, 10.5, 4),
+}
+IconShapes.camera = { shapeBox(1.8, 4.2, 12.4, 9.2, 2), shapeBox(5.5, 6.2, 5, 5, 2.5), shapeLine(5.5, 2.6, 10.5, 2.6) }
+IconShapes.image = {
+	shapeBox(2, 2.5, 12, 11, 2), shapeDot(5.4, 5.6, 2.2),
+	shapeLine(3, 12, 7.5, 8), shapeLine(7.5, 8, 10, 10.2), shapeLine(10, 10.2, 13, 7),
+}
+IconShapes.music = { shapeLine(6, 11.5, 6, 3.2), shapeLine(6, 3.2, 13, 2.2), shapeLine(13, 2.2, 13, 10.5), shapeDot(4.5, 12, 3.2), shapeDot(11.5, 11, 3.2) }
+IconShapes.volume = {
+	shapePoly({ { 2.5, 6 }, { 5.5, 6 }, { 9, 3 }, { 9, 13 }, { 5.5, 10 }, { 2.5, 10 } }, true),
+	shapeLine(11.5, 5.8, 12.8, 8), shapeLine(12.8, 8, 11.5, 10.2),
+}
+IconShapes.mic = { shapeBox(5.5, 2, 5, 8, 2.5), shapeLine(4, 9.5, 12, 9.5), shapeLine(8, 11.5, 8, 14.2), shapeLine(5.5, 14.2, 10.5, 14.2) }
+IconShapes.message = { shapeBox(2, 2.5, 12, 9, 2.2), shapeLine(4.5, 11.5, 4, 14.2), shapeLine(4, 14.2, 7.5, 11.5) }
+IconShapes.send = shapePoly({ { 2, 8 }, { 14, 2.5 }, { 10.5, 14 }, { 7.8, 9.5 } }, true)
+IconShapes.link = { shapeBox(2, 5, 7, 5, 2.5), shapeBox(7, 6, 7, 5, 2.5) }
+IconShapes.external = {
+	shapeBox(2.5, 4.5, 9, 9, 1.8), shapeLine(8, 8, 13.5, 2.5), shapeLine(9.5, 2.5, 13.5, 2.5), shapeLine(13.5, 2.5, 13.5, 6.5),
+}
+IconShapes.power = { shapeBox(2.8, 3.5, 10.4, 10.4, 5.2), shapeLine(8, 1.8, 8, 7.5) }
+IconShapes.rocket = {
+	shapePoly({ { 8, 1.8 }, { 11.5, 6 }, { 11.5, 11 }, { 4.5, 11 }, { 4.5, 6 } }, true),
+	shapeDot(8, 6.8, 2.2), shapeLine(6, 13.8, 6, 11.5), shapeLine(10, 13.8, 10, 11.5),
+}
+IconShapes.car = {
+	shapeBox(2, 6.5, 12, 5.5, 1.8), shapeLine(3.8, 6.5, 5.2, 3.5), shapeLine(5.2, 3.5, 10.8, 3.5), shapeLine(10.8, 3.5, 12.2, 6.5),
+	shapeDot(4.8, 12.2, 2.8), shapeDot(11.2, 12.2, 2.8),
+}
+IconShapes.skull = {
+	shapeBox(3, 2, 10, 8.5, 4.2), shapeBox(5.2, 10.2, 5.6, 3.8, 1.2),
+	shapeDot(6, 6.2, 2.2), shapeDot(10, 6.2, 2.2),
+}
+IconShapes.bug = {
+	shapeBox(4.5, 4.5, 7, 9, 3.5), shapeLine(2, 6.5, 4.5, 7.2), shapeLine(14, 6.5, 11.5, 7.2),
+	shapeLine(2, 11, 4.5, 10.2), shapeLine(14, 11, 11.5, 10.2), shapeLine(6, 2.2, 7, 4.5), shapeLine(10, 2.2, 9, 4.5),
+}
+IconShapes.wrench = { shapeLine(3.5, 12.5, 10.5, 5.5), shapeBox(9.2, 2, 4.8, 4.8, 2.4), shapeDot(3.2, 12.8, 2.6) }
+IconShapes.coins = { shapeBox(2.5, 4, 8, 8, 4), shapeBox(5.5, 6, 8, 8, 4) }
+IconShapes.package = {
+	shapeBox(2.2, 3.2, 11.6, 10, 1.8), shapeLine(2.2, 6.8, 13.8, 6.8), shapeLine(8, 3.2, 8, 6.8),
+}
+IconShapes["eye-off"] = mergeShapes(IconShapes.eye, { shapeLine(2.5, 2.5, 13.5, 13.5) })
+
+-- Aliases praticos
+IconShapes.cog = IconShapes.settings
+IconShapes.gear = IconShapes.settings
+IconShapes.config = IconShapes.settings
+IconShapes.flash = IconShapes.bolt
+IconShapes.lightning = IconShapes.bolt
+IconShapes.alert = IconShapes.warning
+IconShapes.delete = IconShapes.trash
+IconShapes.reload = IconShapes.refresh
+IconShapes.sync = IconShapes.refresh
+IconShapes.aim = IconShapes.crosshair
+IconShapes.floppy = IconShapes.save
+IconShapes.disk = IconShapes.save
+IconShapes.hub = IconShapes.layers
+IconShapes.player = IconShapes.user
+IconShapes.profile = IconShapes.user
+IconShapes.x = IconShapes.close
+
+local CustomIcons = {}
+AetherUI.Icons = IconShapes
 
 local TabIconHints = {
 	{ "home", { "principal", "main", "home", "inicio", "geral", "general" } },
@@ -715,6 +919,8 @@ local TabIconHints = {
 	{ "bell", { "notif", "aviso", "alert" } },
 	{ "info", { "info", "sobre", "about", "credit", "ajuda", "help" } },
 	{ "palette", { "tema", "theme", "color", "aparenc" } },
+	{ "save", { "save", "salvar", "preset", "arquivo", "file" } },
+	{ "sparkles", { "extra", "misc", "fun", "efeito", "effect" } },
 }
 
 local function guessIcon(name)
@@ -773,7 +979,7 @@ local function createVectorIcon(shapes, parent, size, color)
 			table.insert(parts, part)
 		end
 	end
-	local icon = { Instance = container }
+	local icon = { Instance = container, Kind = "Vector" }
 	function icon:SetColor(newColor)
 		for _, part in ipairs(parts) do part.BackgroundColor3 = newColor end
 		for _, stroke in ipairs(strokes) do stroke.Color = newColor end
@@ -789,40 +995,154 @@ local function createVectorIcon(shapes, parent, size, color)
 	return icon
 end
 
-local function createIcon(spec, parent, size, color)
+local function normalizeAssetString(value)
+	if typeof(value) == "number" then
+		return "rbxassetid://" .. tostring(math.floor(value))
+	end
+	if typeof(value) == "string" then
+		if tonumber(value) then return "rbxassetid://" .. value end
+		return value
+	end
+	return nil
+end
+
+local function createIcon(spec, parent, size, color, opts)
 	if spec == nil or spec == "" or spec == false then return nil end
+
+	local customSize = opts and typeof(opts.Size) == "number" and opts.Size or nil
+	local customColor = opts and typeof(opts.Color) == "Color3" and opts.Color or nil
+	local customTransp = opts and tonumber(opts.Transparency) or nil
+	local customScaleType = opts and opts.ScaleType or nil
+	local customCorner = opts and tonumber(opts.CornerRadius) or nil
+
+	if typeof(spec) == "table" then
+		if typeof(spec.Size) == "number" then customSize = spec.Size end
+		if typeof(spec.Color) == "Color3" then customColor = spec.Color end
+		if spec.Transparency ~= nil then customTransp = tonumber(spec.Transparency) end
+		if spec.ScaleType ~= nil then customScaleType = spec.ScaleType end
+		if spec.CornerRadius ~= nil then customCorner = tonumber(spec.CornerRadius) end
+		local inner = spec.Name or spec.Icon or spec.Image or spec.Asset
+		if inner == nil or inner == "" or inner == false then return nil end
+		spec = inner
+	end
+
+	local finalSize = customSize or size or 16
+	local finalColor = customColor or color or Theme.SubText
+
 	if typeof(spec) == "number" then spec = "rbxassetid://" .. tostring(math.floor(spec)) end
 	if typeof(spec) ~= "string" then return nil end
 	if tonumber(spec) then spec = "rbxassetid://" .. spec end
 
-	local shapes = IconShapes[string.lower(spec)]
-	if shapes then return createVectorIcon(shapes, parent, size, color) end
+	local key = string.lower(spec)
+	local registered = CustomIcons[key]
+	if registered ~= nil then
+		if typeof(registered) == "table" and registered.Name == nil and registered.Image == nil and registered.Icon == nil and typeof(registered[1]) == "table" then
+			local icon = createVectorIcon(registered, parent, finalSize, finalColor)
+			icon.CustomSize = customSize
+			icon.CustomColor = customColor ~= nil
+			return icon
+		end
+		return createIcon(registered, parent, finalSize, finalColor, {
+			Size = customSize, Color = customColor, Transparency = customTransp,
+			ScaleType = customScaleType, CornerRadius = customCorner,
+		})
+	end
+
+	local shapes = IconShapes[key]
+	if shapes then
+		local icon = createVectorIcon(shapes, parent, finalSize, finalColor)
+		icon.CustomSize = customSize
+		icon.CustomColor = customColor ~= nil
+		return icon
+	end
 
 	if string.find(spec, "rbxasset", 1, true) or string.find(spec, "http", 1, true) then
 		local image = create("ImageLabel", {
 			Name = "Icon", BackgroundTransparency = 1,
-			Size = UDim2.fromOffset(size, size),
-			Image = spec, ImageColor3 = color, Parent = parent,
+			Size = UDim2.fromOffset(finalSize, finalSize),
+			Image = spec, ImageColor3 = customColor or color or Theme.White,
+			ImageTransparency = customTransp or 0,
+			ScaleType = customScaleType or Enum.ScaleType.Fit,
+			Parent = parent,
 		})
-		local icon = { Instance = image }
-		function icon:SetColor(c) image.ImageColor3 = c end
-		function icon:Tween(c, d) tween(image, d or Anim.Fast, { ImageColor3 = c }) end
+		if customCorner and customCorner > 0 then
+			if customCorner <= 1 then addCornerScale(image, customCorner) else addCorner(image, customCorner) end
+		end
+		local hasTint = customColor ~= nil or (color ~= nil and color ~= Theme.White)
+		local icon = {
+			Instance = image, Kind = "Image",
+			CustomSize = customSize, CustomColor = customColor ~= nil,
+		}
+		function icon:SetColor(c)
+			if typeof(c) == "Color3" then image.ImageColor3 = c end
+		end
+		function icon:Tween(c, d)
+			if typeof(c) == "Color3" and hasTint then tween(image, d or Anim.Fast, { ImageColor3 = c }) end
+		end
 		function icon:SetSize(px) image.Size = UDim2.fromOffset(px, px) end
+		function icon:SetImage(newAsset)
+			local norm = normalizeAssetString(newAsset)
+			if norm then image.Image = norm end
+		end
+		function icon:SetTransparency(alpha)
+			image.ImageTransparency = tonumber(alpha) or 0
+		end
 		return icon
 	end
 
 	local glyph = create("TextLabel", {
 		Name = "Icon", BackgroundTransparency = 1,
-		Size = UDim2.fromOffset(size, size), Text = spec,
-		Font = Theme.FontBold, TextSize = size, TextColor3 = color, Parent = parent,
+		Size = UDim2.fromOffset(finalSize, finalSize), Text = spec,
+		Font = Theme.FontBold, TextSize = finalSize, TextColor3 = finalColor,
+		TextTransparency = customTransp or 0, Parent = parent,
 	})
-	local icon = { Instance = glyph }
+	local icon = {
+		Instance = glyph, Kind = "Glyph",
+		CustomSize = customSize, CustomColor = customColor ~= nil,
+	}
 	function icon:SetColor(c) glyph.TextColor3 = c end
 	function icon:Tween(c, d) tween(glyph, d or Anim.Fast, { TextColor3 = c }) end
 	function icon:SetSize(px)
 		glyph.Size = UDim2.fromOffset(px, px); glyph.TextSize = px
 	end
+	function icon:SetTransparency(alpha) glyph.TextTransparency = tonumber(alpha) or 0 end
 	return icon
+end
+
+local function iconSizeOf(icon, fallback)
+	if icon and icon.CustomSize then return icon.CustomSize end
+	return fallback
+end
+
+function AetherUI.RegisterIcon(first, second, third)
+	local name, spec = first, second
+	if first == AetherUI then name, spec = second, third end
+	if typeof(name) ~= "string" or name == "" then return false end
+	local key = string.lower(name)
+	if typeof(spec) == "number" then
+		CustomIcons[key] = "rbxassetid://" .. tostring(math.floor(spec))
+	else
+		CustomIcons[key] = spec
+	end
+	return true
+end
+
+function AetherUI.CreateIcon(first, second, third, fourth, fifth)
+	local spec, parent, size, color = first, second, third, fourth
+	if first == AetherUI then spec, parent, size, color = second, third, fourth, fifth end
+	return createIcon(spec, parent, size or 16, color or Theme.SubText)
+end
+
+function AetherUI.GetIcons()
+	local seen, names = {}, {}
+	for k in pairs(IconShapes) do
+		if not seen[k] then seen[k] = true; table.insert(names, k) end
+	end
+	for k in pairs(CustomIcons) do
+		if not seen[k] then seen[k] = true; table.insert(names, k) end
+	end
+	table.sort(names)
+	return names
 end
 
 local function spawnRipple(parent, position, color, sizeLimit)
