@@ -5318,13 +5318,22 @@ function Window:_dockCenter()
 end
 
 function Window:_dockClamp(position, wide)
+	-- Movimento livre em X e Y: o unico limite e manter o Dock inteiro dentro da tela.
+	-- (Dock usa AnchorPoint (0.5, 0): X = centro, Y = topo.)
 	local viewport = getViewport()
 	local width = wide and self._dockWidth or self._dockSphereSize
 	local height = self._dockSphereSize
-	local topY = math.max(6, getGuiInset().Y + 2)
+	local margin = 4
 	local cx = position.X.Scale * viewport.X + position.X.Offset
-	local nx = math.clamp(cx, width / 2 + 8, viewport.X - width / 2 - 8)
-	return UDim2.new(0.5, nx - viewport.X / 2, 0, topY)
+	local cy = position.Y.Scale * viewport.Y + position.Y.Offset
+	local halfW = width / 2
+	local minX = math.min(halfW + margin, viewport.X / 2)
+	local maxX = math.max(viewport.X - halfW - margin, viewport.X / 2)
+	local minY = margin
+	local maxY = math.max(viewport.Y - height - margin, minY)
+	local nx = math.clamp(cx, minX, maxX)
+	local ny = math.clamp(cy, minY, maxY)
+	return UDim2.new(0.5, nx - viewport.X / 2, 0, ny)
 end
 
 function Window:_dockReclamp()
