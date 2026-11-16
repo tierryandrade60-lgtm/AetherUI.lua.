@@ -5645,14 +5645,20 @@ function Window:_buildDock(config)
 
 	function onDockEnded(input)
 		if not dragging or not activeInput then return end
-		local same = input == activeInput or (input.UserInputType == Enum.UserInputType.MouseButton1
-			and activeInput.UserInputType == Enum.UserInputType.MouseButton1)
+		local same = input == activeInput
+			or (input.UserInputType == Enum.UserInputType.MouseButton1
+				and activeInput.UserInputType == Enum.UserInputType.MouseButton1)
+			or (input.UserInputType == Enum.UserInputType.Touch
+				and activeInput.UserInputState == Enum.UserInputState.End)
 		if not same then return end
 		untrackDock()
 		dragging = false
 		activeInput = nil
-		local wasMoved, wasHold = moved, holdFired
+		local wasMoved, wasHold, fromSphere = moved, holdFired, startedOnSphere
 		local slot = pressedSlot
+		local savedOffset = dockOffset
+		startedOnSphere = false
+		dockOffset = nil
 		setPressed(nil)
 		if holdToken then cancelHold() end
 		if wasMoved then
@@ -5660,14 +5666,25 @@ function Window:_buildDock(config)
 			return
 		end
 		if wasHold then return end
-		local point = pointerPosition(input)
-		local center = sphere.AbsolutePosition + sphere.AbsoluteSize / 2
-		if (point - center).Magnitude <= sphere.AbsoluteSize.X / 2 + 2 then
+		if fromSphere then
 			self:_dockToggleWindow()
 			return
 		end
-		local hit = findSlot(point)
-		if hit and hit == slot then safeCall(hit.Action) end
+		local raw = Vector2.new(input.Position.X, input.Position.Y)
+		local inset = getGuiInset()
+		local center = sphere.AbsolutePosition + sphere.AbsoluteSize / 2
+		local radius = sphere.AbsoluteSize.X / 2 + (mobile and 6 or 2)
+		local minDist = (pointerPosition(input, savedOffset) - center).Magnitude
+		minDist = math.min(minDist, (raw - center).Magnitude)
+		if inset.Magnitude > 0 then
+			minDist = math.min(minDist, ((raw + inset) - center).Magnitude)
+		end
+		if minDist <= radius then
+			self:_dockToggleWindow()
+			return
+		end
+		local hit = findSlot(raw, savedOffset)
+		if hit and (hit == slot or slot == nil) then safeCall(hit.Action) end
 	end
 
 	local dockMoveConn, dockEndConn
