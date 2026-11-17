@@ -594,7 +594,7 @@ local function makeDraggable(handle, target, connections, options)
 	local dragging, moved, activeInput = false, false, nil
 	local startPointer = Vector2.zero
 	local startPosition = target.Position
-	local didMoveThreshold = options.Threshold or 4
+	local didMoveThreshold = options.Threshold or (isMobile() and 7 or 5)
 	local moveConn, endConn
 
 	-- InputChanged/InputEnded globais so existem durante o gesto.
@@ -620,8 +620,11 @@ local function makeDraggable(handle, target, connections, options)
 
 	local function onEnd(input)
 		if not dragging or not activeInput then return end
-		local same = input == activeInput or (input.UserInputType == Enum.UserInputType.MouseButton1
-			and activeInput.UserInputType == Enum.UserInputType.MouseButton1)
+		local same = input == activeInput
+			or (input.UserInputType == Enum.UserInputType.MouseButton1
+				and activeInput.UserInputType == Enum.UserInputType.MouseButton1)
+			or (input.UserInputType == Enum.UserInputType.Touch
+				and activeInput.UserInputState == Enum.UserInputState.End)
 		if not same then return end
 		local wasMoved = moved
 		release()
@@ -5318,22 +5321,13 @@ function Window:_dockCenter()
 end
 
 function Window:_dockClamp(position, wide)
-	-- Movimento livre em X e Y: o unico limite e manter o Dock inteiro dentro da tela.
-	-- (Dock usa AnchorPoint (0.5, 0): X = centro, Y = topo.)
 	local viewport = getViewport()
 	local width = wide and self._dockWidth or self._dockSphereSize
 	local height = self._dockSphereSize
-	local margin = 4
+	local topY = math.max(6, getGuiInset().Y + 2)
 	local cx = position.X.Scale * viewport.X + position.X.Offset
-	local cy = position.Y.Scale * viewport.Y + position.Y.Offset
-	local halfW = width / 2
-	local minX = math.min(halfW + margin, viewport.X / 2)
-	local maxX = math.max(viewport.X - halfW - margin, viewport.X / 2)
-	local minY = margin
-	local maxY = math.max(viewport.Y - height - margin, minY)
-	local nx = math.clamp(cx, minX, maxX)
-	local ny = math.clamp(cy, minY, maxY)
-	return UDim2.new(0.5, nx - viewport.X / 2, 0, ny)
+	local nx = math.clamp(cx, width / 2 + 8, viewport.X - width / 2 - 8)
+	return UDim2.new(0.5, nx - viewport.X / 2, 0, topY)
 end
 
 function Window:_dockReclamp()
@@ -5553,6 +5547,7 @@ function Window:_buildDock(config)
 
 	local dragging, moved, holdFired, startedOnSphere = false, false, false, false
 	local activeInput, holdToken, holdTween, pressedSlot, dockOffset = nil, nil, nil, nil, nil
+	local lastBlockedActivated = 0
 	local startPointer, startPosition = Vector2.zero, dock.Position
 	local dragThreshold = mobile and 12 or 6
 
@@ -5621,6 +5616,7 @@ function Window:_buildDock(config)
 		task.delay(DOCK_HOLD_TIME, function()
 			if holdToken ~= token or not dragging or moved or self._state == "Destroyed" then return end
 			holdFired = true
+			lastBlockedActivated = os.clock()
 			holdToken = nil
 			holdTween = nil
 			setPressed(nil)
@@ -5635,6 +5631,9 @@ function Window:_buildDock(config)
 		onBeganFrom("sphere", input)
 	end)
 	sphere.Activated:Connect(function()
+		if dragging or moved or holdFired or (os.clock() - lastBlockedActivated < 0.35) then
+			return
+		end
 		self:_dockToggleWindow()
 	end)
 	pill.InputBegan:Connect(function(input) onBeganFrom("pill", input) end)
@@ -5657,8 +5656,11 @@ function Window:_buildDock(config)
 		if not moved then
 			if totalDelta.Magnitude < deadzone then return end
 			moved = true
+			lastBlockedActivated = os.clock()
 			cancelHold()
 			setPressed(nil)
+		else
+			lastBlockedActivated = os.clock()
 		end
 		local nextPosition = UDim2.new(
 			startPosition.X.Scale, startPosition.X.Offset + totalDelta.X,
@@ -5686,10 +5688,14 @@ function Window:_buildDock(config)
 		setPressed(nil)
 		if holdToken then cancelHold() end
 		if wasMoved then
+			lastBlockedActivated = os.clock()
 			DockMemory.Position = dock.Position
 			return
 		end
-		if wasHold then return end
+		if wasHold then
+			lastBlockedActivated = os.clock()
+			return
+		end
 		if fromSphere then
 			self:_dockToggleWindow()
 			return
