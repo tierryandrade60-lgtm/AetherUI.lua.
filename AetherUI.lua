@@ -1,10 +1,21 @@
 --[[
-	AetherUI v2.7.0 - arquivo unico (Parte 1/3 + 2/3 + 3/3 ja unidas)
+	AetherUI v2.8.0 - arquivo unico (Parte 1/3 + 2/3 + 3/3 ja unidas)
 	Inclui: cabecalho, tema, estado, utilitarios, biblioteca expandida de icones,
 	        notificacoes (DisplayOrder 990, abaixo da UI),
 	        Section, Label, Button, Toggle, Slider, Dropdown, MultiDropdown,
-	        RadioGroup, ColorPicker, Search global, Favoritos e Save Configuration.
+	        RadioGroup, ColorPicker, Search global, Favoritos, Save Configuration,
+	        Sistema de Animacoes & Transicoes configuravel e Performance Monitor.
 	Cole TODO este arquivo em um unico ModuleScript ou carregue via loadstring.
+
+	v2.8.0 (Animacoes & Transicoes Configuraveis + Performance Monitor):
+	  - Sistema completo de Animacoes: controle global e individual por categoria
+	    (Window, Panels, Hover, Tabs, Sidebar, Ball/Dock, Notifications), velocidade,
+	    EasingStyle, intensidade, efeitos (Fade, Slide, Scale, Blur e combinacoes)
+	    e modo Reduzir Movimento (ReduceMotion).
+	  - Performance Monitor em tempo real: FPS, FrameTime (ms), Uptime, Elementos
+	    ativos, GuiObjects, Tweens ativos, Conexoes e Memoria (MB), integrado na
+	    aba Interface e como HUD flutuante arrastavel (compacto ou expandido).
+	  - ExportConfig / ImportConfig / AutoLoad salvam e restauram Animacoes e HUD.
 
 	v2.7.0 (Mobile + Bolinha + ColorPicker + RadioGroup + Save Config + Icones):
 	  - Floating Ball (Bolinha): aparece SOMENTE quando o painel principal esta
@@ -1407,6 +1418,16 @@ IconShapes.package = {
 IconShapes["eye-off"] = mergeShapes(IconShapes.eye, { shapeLine(2.5, 2.5, 13.5, 13.5) })
 
 -- Aliases praticos
+IconShapes.activity = {
+	shapeLine(1.5, 8.5, 4.5, 8.5), shapeLine(4.5, 8.5, 6.5, 3.5),
+	shapeLine(6.5, 3.5, 9.5, 12.5), shapeLine(9.5, 12.5, 11.5, 8.5), shapeLine(11.5, 8.5, 14.5, 8.5),
+}
+IconShapes.monitor = {
+	shapeBox(1.8, 2.5, 12.4, 8.5, 1.5), shapeLine(8, 11, 8, 13.8), shapeLine(5, 13.8, 11, 13.8),
+}
+IconShapes.minimize = { shapeBox(3, 3, 10, 10, 2), shapeLine(5.5, 8, 10.5, 8) }
+IconShapes.chart = IconShapes.activity
+IconShapes.eyeoff = IconShapes["eye-off"]
 IconShapes.cog = IconShapes.settings
 IconShapes.gear = IconShapes.settings
 IconShapes.config = IconShapes.settings
