@@ -4688,6 +4688,7 @@ local KindInfo = {
 	Option = { Label = "Opcao", Words = "opcao option item" },
 }
 local SettingsWords = " configuracoes configuracao settings config opcoes preferencias ajustes"
+local MenuWords = " menu desempenho performance fps ping uptime grafico historico smart antilag anti-lag otimizacao"
 
 function Window:_collectSearch(query)
 	local q = normalizeText(query)
@@ -4719,11 +4720,12 @@ function Window:_collectSearch(query)
 	end
 
 	for tabIndex, tab in ipairs(self:_ordered()) do
-		local settingsWords = tab._isSettings and SettingsWords or ""
-		local tabScore = evaluate(tab._name, normalizeText(KindInfo.Tab.Words .. settingsWords))
+		local extraWords = tab._isSettings and SettingsWords or (tab._isMenu and MenuWords or "")
+		local tabScore = evaluate(tab._name, normalizeText(KindInfo.Tab.Words .. extraWords))
 		if tabScore then
 			add({
-				Name = tab._name, Path = tab._isSettings and "Configuracoes" or "Menu lateral",
+				Name = tab._name,
+				Path = tab._isMenu and "Menu" or (tab._isSettings and "Configuracoes" or "Menu lateral"),
 				KindLabel = KindInfo.Tab.Label, Kind = "Tab", Tab = tab,
 			}, tabScore, tabIndex, -1)
 		end
@@ -4732,7 +4734,7 @@ function Window:_collectSearch(query)
 			local info = KindInfo[entry.Kind] or KindInfo.Label
 			local path = tab._name
 			if entry.SectionEntry then path = path .. " / " .. tostring(entry.SectionEntry.GetName()) end
-			local score = evaluate(name, normalizeText(path .. " " .. info.Words .. settingsWords))
+			local score = evaluate(name, normalizeText(path .. " " .. info.Words .. extraWords))
 			if score then
 				add({
 					Name = name, Path = path, KindLabel = info.Label,
@@ -4781,7 +4783,7 @@ function Window:_layoutSearch(animate)
 	self._searchBarW, self._searchBarH = width, height
 	local size = UDim2.fromOffset(width, height)
 	bar.Position = UDim2.fromOffset(m.SidePad, 6)
-	if animate then tween(bar, Anim.Fast, { Size = size }, nil, nil, "Sidebar") else bar.Size = size end
+	if animate then tween(bar, Anim.Fast, { Size = size }) else bar.Size = size end
 	local top = 6 + height + 6
 	self._list.Position = UDim2.fromOffset(0, top)
 	self._list.Size = UDim2.new(1, -1, 1, -top)
@@ -5290,7 +5292,7 @@ end
 ----------------------------------------------------------------
 -- Tab lateral (com hover + bounce)
 ----------------------------------------------------------------
-function Window:_createTab(label, iconSpec, isSettings, isFavorites, iconOpts)
+function Window:_createTab(label, iconSpec, isSettings, isFavorites, iconOpts, isMenu)
 	local m = self._metrics
 	if iconSpec == nil then iconSpec = guessIcon(label) end
 	local button = create("TextButton", {
@@ -5339,7 +5341,9 @@ function Window:_createTab(label, iconSpec, isSettings, isFavorites, iconOpts)
 		Padding = UDim.new(0, m.Gap), SortOrder = Enum.SortOrder.LayoutOrder, Parent = page,
 	})
 	local tab = setmetatable({
-		_window = self, _name = label, _isSettings = isSettings == true,
+		_window = self, _name = label,
+		_isSettings = isSettings == true,
+		_isMenu = isMenu == true,
 		_page = page, _pagePadding = pagePadding, _pageLayout = pageLayout,
 		_holder = holder, _holderScale = holderScale, _button = button, _label = nameLabel, _icon = icon,
 		_metrics = m, _connections = self._connections, _order = 0,
@@ -5368,23 +5372,20 @@ function Window:_createTab(label, iconSpec, isSettings, isFavorites, iconOpts)
 	button.MouseEnter:Connect(function()
 		tab._hover = true; tab:_paint(true)
 		if self._selectedTab ~= tab then
-			tween(hoverStroke, Anim.Fast, { Transparency = 0.85 }, nil, nil, "Hover")
+			tween(hoverStroke, Anim.Fast, { Transparency = 0.85 })
 		end
 	end)
 	button.MouseLeave:Connect(function()
 		tab._hover = false; tab._pressed = false; tab:_paint(true)
-		tween(hoverStroke, Anim.Fast, { Transparency = 1 }, nil, nil, "Hover")
+		tween(hoverStroke, Anim.Fast, { Transparency = 1 })
 	end)
 	button.MouseButton1Down:Connect(function()
 		tab._pressed = true
-		local cfg = resolveAnim("Hover", Anim.Micro)
-		if cfg.Active and not cfg.ReduceMotion then
-			tween(buttonScale, Anim.Micro, { Scale = 1 - 0.06 * cfg.Intensity }, nil, nil, "Hover")
-		end
+		tween(buttonScale, Anim.Micro, { Scale = 0.94 })
 	end)
 	button.MouseButton1Up:Connect(function()
 		tab._pressed = false
-		tween(buttonScale, Anim.Spring, { Scale = tab:_restScale() }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, "Hover")
+		tween(buttonScale, Anim.Spring, { Scale = tab:_restScale() }, Enum.EasingStyle.Back)
 	end)
 	button.InputBegan:Connect(function(input)
 		if isPointer(input) then detectPointerOffset(input, button) end
@@ -5397,7 +5398,7 @@ function Window:_createTab(label, iconSpec, isSettings, isFavorites, iconOpts)
 	end)
 	tab:_applyCollapse(self._collapsed == true, false)
 	self:_layoutSidebar()
-	if not isSettings and not isFavorites then
+	if not isSettings and not isFavorites and not isMenu then
 		self._userTabs = self._userTabs + 1
 		if self._userTabs == 1 then self:_selectTab(tab, false) end
 	end
@@ -5415,10 +5416,207 @@ function Window:AddTab(name, icon)
 	end
 	return self:_createTab(tostring(name or "Tab"), icon, false, false, iconOpts)
 end
+function Window:GetMenuTab() return self._menuTab end
 function Window:GetSettingsTab() return self._settingsTab end
 
 ----------------------------------------------------------------
--- Configuracoes embutidas
+-- Aba Menu (Telemetria em tempo real + Grafico FPS + Smart Performance)
+----------------------------------------------------------------
+function Window:_buildMenu()
+	local tab = self:_createTab("Menu", "activity", false, false, nil, true)
+	self._menuTab = tab
+	self:_layoutSidebar()
+	self:_moveIndicator(false)
+
+	tab:AddSection({ Text = "Desempenho em Tempo Real", Icon = "activity" })
+
+	local page = tab._page
+	local m = self._metrics
+
+	local metricsCard = create("Frame", {
+		Name = "MenuMetricsRow", LayoutOrder = tab:_nextOrder(),
+		Size = UDim2.new(1, 0, 0, m.Compact and 54 or 60),
+		BackgroundTransparency = 1, Parent = page,
+	})
+	create("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder, Parent = metricsCard,
+	})
+
+	local function makeMetricTile(order, titleStr, initialVal)
+		local tile = create("Frame", {
+			Name = "Tile_" .. titleStr, LayoutOrder = order,
+			Size = UDim2.new(1 / 3, -4, 1, 0),
+			BackgroundColor3 = Theme.Element, BackgroundTransparency = Glass.Element,
+			Parent = metricsCard,
+		})
+		addCorner(tile, 10)
+		addStroke(tile, Theme.StrokeSoft, 0.35, 1)
+		create("TextLabel", {
+			Name = "Caption", BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(9, 6), Size = UDim2.new(1, -18, 0, 12),
+			Text = titleStr, Font = Theme.FontBold, TextSize = math.max(9, m.Text - 4),
+			TextColor3 = Theme.Muted, TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd, Parent = tile,
+		})
+		local valLabel = create("TextLabel", {
+			Name = "Value", BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(9, 20), Size = UDim2.new(1, -18, 0, 18),
+			Text = initialVal, Font = Theme.FontBold, TextSize = m.Text + 2,
+			TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd, Parent = tile,
+		})
+		local subLabel = create("TextLabel", {
+			Name = "Sub", BackgroundTransparency = 1,
+			Position = UDim2.fromOffset(9, 39), Size = UDim2.new(1, -18, 0, 12),
+			Text = "--", Font = Theme.Font, TextSize = math.max(9, m.Text - 4),
+			TextColor3 = Theme.SubText, TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd, Parent = tile,
+		})
+		return valLabel, subLabel
+	end
+
+	local fpsVal, fpsSub = makeMetricTile(1, "FPS", "60")
+	local pingVal, pingSub = makeMetricTile(2, "PING", "-- ms")
+	local uptimeVal, uptimeSub = makeMetricTile(3, "UPTIME", "00:00")
+
+	local graphCard = create("Frame", {
+		Name = "FpsGraphCard", LayoutOrder = tab:_nextOrder(),
+		Size = UDim2.new(1, 0, 0, m.Compact and 104 or 116),
+		BackgroundColor3 = Theme.Element, BackgroundTransparency = Glass.Element,
+		Parent = page,
+	})
+	addCorner(graphCard, 10)
+	local graphStroke = addStroke(graphCard, Theme.StrokeSoft, 0.35, 1)
+
+	create("TextLabel", {
+		Name = "Title", BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(11, 7), Size = UDim2.new(0.45, -11, 0, 16),
+		Text = "Historico de FPS", Font = Theme.FontBold, TextSize = m.Text - 1,
+		TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left, Parent = graphCard,
+	})
+	local graphSummary = create("TextLabel", {
+		Name = "Summary", BackgroundTransparency = 1,
+		Position = UDim2.new(0.45, 0, 0, 7), Size = UDim2.new(0.55, -11, 0, 16),
+		Text = "Min --  •  Med --  •  Max --", Font = Theme.Font, TextSize = math.max(9, m.Text - 3),
+		TextColor3 = Theme.SubText, TextXAlignment = Enum.TextXAlignment.Right,
+		TextTruncate = Enum.TextTruncate.AtEnd, Parent = graphCard,
+	})
+
+	local plot = create("Frame", {
+		Name = "Plot", BackgroundColor3 = Theme.Surface, BackgroundTransparency = 0.35,
+		Position = UDim2.fromOffset(10, 28), Size = UDim2.new(1, -20, 1, -38),
+		ClipsDescendants = true, Parent = graphCard,
+	})
+	addCorner(plot, 7)
+
+	-- Guias de referencia (30 FPS e 60 FPS)
+	create("Frame", {
+		Name = "Guide60", BackgroundColor3 = Theme.Success, BackgroundTransparency = 0.8,
+		Position = UDim2.new(0, 0, 0.16, 0), Size = UDim2.new(1, 0, 0, 1), ZIndex = 1, Parent = plot,
+	})
+	create("Frame", {
+		Name = "Guide30", BackgroundColor3 = Theme.Warning, BackgroundTransparency = 0.82,
+		Position = UDim2.new(0, 0, 0.58, 0), Size = UDim2.new(1, 0, 0, 1), ZIndex = 1, Parent = plot,
+	})
+
+	local barCount = PerfMonitor.HistoryMax
+	local barHolders = create("Frame", {
+		Name = "Bars", BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(4, 4), Size = UDim2.new(1, -8, 1, -8),
+		ZIndex = 2, Parent = plot,
+	})
+	local graphBars = {}
+	for i = 1, barCount do
+		local bar = create("Frame", {
+			Name = "B" .. i, AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.new((i - 1) / barCount, 1, 1, 0),
+			Size = UDim2.new(1 / barCount, -2, 0.1, 0),
+			BackgroundColor3 = Theme.Success, BackgroundTransparency = 0.15,
+			ZIndex = 2, Parent = barHolders,
+		})
+		addCorner(bar, 2)
+		graphBars[i] = bar
+	end
+
+	tab:AddSection({ Text = "Smart Performance (Anti-Lag)", Icon = "shield" })
+
+	local toggleSmartPerf = tab:AddToggle({
+		Name = "Smart Performance", Icon = "bolt", Default = SmartPerf.Enabled == true,
+		Callback = function(value)
+			if self._syncing then return end
+			AetherUI.SetSmartPerformance(value)
+		end,
+	})
+
+	local smartCard = create("Frame", {
+		Name = "SmartPerfCard", LayoutOrder = tab:_nextOrder(),
+		Size = UDim2.new(1, 0, 0, m.Compact and 82 or 88),
+		BackgroundColor3 = Theme.Element, BackgroundTransparency = Glass.Element,
+		Parent = page,
+	})
+	addCorner(smartCard, 10)
+	local smartStroke = addStroke(smartCard, Theme.StrokeSoft, 0.35, 1)
+
+	local smartDot = create("Frame", {
+		Name = "Dot", AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 12, 0, 16),
+		Size = UDim2.fromOffset(8, 8),
+		BackgroundColor3 = SmartPerf.Enabled and Theme.Success or Theme.Muted,
+		Parent = smartCard,
+	})
+	addCornerScale(smartDot, 0.5)
+
+	local smartHeader = create("TextLabel", {
+		Name = "Header", BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(26, 7), Size = UDim2.new(1, -38, 0, 18),
+		Text = "Anti-Lag por Distancia: Inativo", Font = Theme.FontBold, TextSize = m.Text - 1,
+		TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd, Parent = smartCard,
+	})
+	local smartZones = create("TextLabel", {
+		Name = "Zones", BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(12, 27), Size = UDim2.new(1, -24, 0, 16),
+		Text = "Perto: 0  •  Medio: 0  •  Longe: 0", Font = Theme.Font, TextSize = m.Text - 2,
+		TextColor3 = Theme.SubText, TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd, Parent = smartCard,
+	})
+	local smartDetail = create("TextLabel", {
+		Name = "Detail", BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(12, 44), Size = UDim2.new(1, -24, 0, 16),
+		Text = "Otimizados: 0  •  Cache: 0  •  Raios: 130 / 290 st", Font = Theme.Font, TextSize = m.Text - 3,
+		TextColor3 = Theme.Muted, TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd, Parent = smartCard,
+	})
+	create("TextLabel", {
+		Name = "Guarantee", BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(12, 62), Size = UDim2.new(1, -24, 0, 16),
+		Text = "Preserva objetos proximos, personagens, luzes, efeitos, texturas e fisica.",
+		Font = Theme.Font, TextSize = math.max(9, m.Text - 4),
+		TextColor3 = Theme.Muted, TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd, Parent = smartCard,
+	})
+
+	self:_onAccent(function(animate)
+		setProps(graphStroke, { Color = accentSoft(0.45) }, animate, Anim.Normal)
+		setProps(smartStroke, { Color = SmartPerf.Enabled and accent() or Theme.StrokeSoft }, animate, Anim.Normal)
+	end)
+
+	self._menuControls = {
+		SmartPerf = toggleSmartPerf,
+		FpsVal = fpsVal, FpsSub = fpsSub,
+		PingVal = pingVal, PingSub = pingSub,
+		UptimeVal = uptimeVal, UptimeSub = uptimeSub,
+		GraphSummary = graphSummary, GraphBars = graphBars,
+		SmartDot = smartDot, SmartHeader = smartHeader,
+		SmartZones = smartZones, SmartDetail = smartDetail,
+		SmartStroke = smartStroke,
+	}
+	tab:_refresh()
+end
+
+----------------------------------------------------------------
+-- Configuracoes embutidas (Interface — preservada)
 ----------------------------------------------------------------
 function Window:_buildSettings()
 	local tab = self:_createTab("Interface", "settings", true)
@@ -5460,184 +5658,6 @@ function Window:_buildSettings()
 			AetherUI.SetLowPerformance(value)
 		end,
 	})
-
-	tab:AddSection({ Text = "Animacoes & Transicoes", Icon = "sparkles" })
-	local selectedCatKey = "Window"
-	local catLabelToKey = {}
-	local catOptions = {}
-	for _, key in ipairs(AnimCategoryOrder) do
-		local lbl = AnimCategoryLabels[key] or key
-		catLabelToKey[lbl] = key
-		table.insert(catOptions, lbl)
-	end
-
-	local toggleAnimEnabled = tab:AddToggle({
-		Name = "Animacoes ativas", Icon = "play", Default = AnimConfig.Enabled,
-		Callback = function(value)
-			if self._syncing then return end
-			AetherUI.SetAnimationsEnabled(value)
-		end,
-	})
-	local toggleReduceMotion = tab:AddToggle({
-		Name = "Reduzir movimento", Icon = "eyeoff", Default = AnimConfig.ReduceMotion,
-		Callback = function(value)
-			if self._syncing then return end
-			AetherUI.SetReduceMotion(value)
-		end,
-	})
-	local ddAnimEffect = tab:AddDropdown({
-		Name = "Efeito global", Icon = "layers",
-		Options = EffectOptions, Default = AnimConfig.Effect,
-		Callback = function(value)
-			if self._syncing or not value then return end
-			AetherUI.SetAnimationConfig({ Effect = value })
-		end,
-	})
-	local ddAnimStyle = tab:AddDropdown({
-		Name = "Estilo de easing", Icon = "sliders",
-		Options = EasingStyleOptions, Default = AnimConfig.Style,
-		Callback = function(value)
-			if self._syncing or not value then return end
-			AetherUI.SetAnimationConfig({ Style = value })
-		end,
-	})
-	local sliderAnimSpeed = tab:AddSlider({
-		Name = "Velocidade global", Icon = "gauge",
-		Min = 0.5, Max = 2.5, Step = 0.05, Suffix = "x",
-		Default = AnimConfig.Speed,
-		Callback = function(value)
-			if self._syncing then return end
-			AetherUI.SetAnimationConfig({ Speed = value })
-		end,
-	})
-	local sliderAnimIntensity = tab:AddSlider({
-		Name = "Intensidade global", Icon = "sun",
-		Min = 0, Max = 2, Step = 0.05, Suffix = "x",
-		Default = AnimConfig.Intensity,
-		Callback = function(value)
-			if self._syncing then return end
-			AetherUI.SetAnimationConfig({ Intensity = value })
-		end,
-	})
-
-	local ddCatSelect, toggleCatEnabled, ddCatEffect, sliderCatSpeed, sliderCatIntensity
-	local function syncCategoryControls()
-		local cat = AnimConfig.Categories[selectedCatKey]
-		if not cat then return end
-		local wasSyncing = self._syncing
-		self._syncing = true
-		if toggleCatEnabled then toggleCatEnabled:Set(cat.Enabled == true, true) end
-		if ddCatEffect then ddCatEffect:Set(cat.Effect, true) end
-		if sliderCatSpeed then sliderCatSpeed:Set(cat.Speed, true) end
-		if sliderCatIntensity then sliderCatIntensity:Set(cat.Intensity, true) end
-		self._syncing = wasSyncing
-	end
-
-	ddCatSelect = tab:AddDropdown({
-		Name = "Personalizar categoria", Icon = "grid",
-		Options = catOptions, Default = AnimCategoryLabels[selectedCatKey],
-		Callback = function(value)
-			if self._syncing or not value then return end
-			local resolved = catLabelToKey[value] or resolveCategoryKey(value)
-			if resolved then
-				selectedCatKey = resolved
-				syncCategoryControls()
-			end
-		end,
-	})
-	toggleCatEnabled = tab:AddToggle({
-		Name = "Categoria ativa", Icon = "check",
-		Default = AnimConfig.Categories[selectedCatKey].Enabled,
-		Callback = function(value)
-			if self._syncing then return end
-			AetherUI.SetCategoryAnimation(selectedCatKey, { Enabled = value })
-		end,
-	})
-	ddCatEffect = tab:AddDropdown({
-		Name = "Efeito da categoria", Icon = "layers",
-		Options = EffectOptions, Default = AnimConfig.Categories[selectedCatKey].Effect,
-		Callback = function(value)
-			if self._syncing or not value then return end
-			AetherUI.SetCategoryAnimation(selectedCatKey, { Effect = value })
-		end,
-	})
-	sliderCatSpeed = tab:AddSlider({
-		Name = "Velocidade da categoria", Icon = "gauge",
-		Min = 0.5, Max = 2.5, Step = 0.05, Suffix = "x",
-		Default = AnimConfig.Categories[selectedCatKey].Speed,
-		Callback = function(value)
-			if self._syncing then return end
-			AetherUI.SetCategoryAnimation(selectedCatKey, { Speed = value })
-		end,
-	})
-	sliderCatIntensity = tab:AddSlider({
-		Name = "Intensidade da categoria", Icon = "sun",
-		Min = 0, Max = 2, Step = 0.05, Suffix = "x",
-		Default = AnimConfig.Categories[selectedCatKey].Intensity,
-		Callback = function(value)
-			if self._syncing then return end
-			AetherUI.SetCategoryAnimation(selectedCatKey, { Intensity = value })
-		end,
-	})
-	tab:AddButton({
-		Name = "Restaurar animacoes padrao", Icon = "refresh",
-		Callback = function()
-			AetherUI.ResetAnimations()
-			AetherUI.Notify({ Title = "Animacoes restauradas", Content = "Configuracoes de transicao redefinidas.", Type = "info", Duration = 2.4 })
-		end,
-	})
-
-	tab:AddSection({ Text = "Performance Monitor", Icon = "activity" })
-	local perfMainLabel = tab:AddLabel({
-		Text = "FPS: 60 (16.7 ms)  •  Uptime: 00:00",
-		Icon = "activity",
-	})
-	local perfStatsLabel = tab:AddLabel({
-		Text = "Elementos: 0  •  Tweens: 0  •  Mem: 0 MB",
-		Icon = "cpu",
-	})
-	local perfDetailLabel = tab:AddLabel({
-		Text = "GuiObjects: 0  •  Conexoes: 0  •  Janelas: 1",
-		Icon = "chart",
-	})
-	local togglePerfHud = tab:AddToggle({
-		Name = "Painel flutuante (HUD)", Icon = "monitor", Default = self._perfHudVisible == true,
-		Callback = function(value)
-			if self._syncing then return end
-			self:SetPerformanceMonitorVisible(value)
-		end,
-	})
-	local togglePerfCompact = tab:AddToggle({
-		Name = "HUD compacto", Icon = "minimize", Default = self._perfHudCompact == true,
-		Callback = function(value)
-			if self._syncing then return end
-			self:SetPerformanceMonitorCompact(value)
-		end,
-	})
-	local sliderPerfInterval = tab:AddSlider({
-		Name = "Intervalo do monitor", Icon = "clock",
-		Min = 0.2, Max = 1.5, Step = 0.1, Suffix = "s",
-		Default = PerfMonitor.Interval,
-		Callback = function(value)
-			if self._syncing then return end
-			AetherUI.SetPerformanceMonitorInterval(value)
-		end,
-	})
-
-	local function syncAnimationsControls()
-		toggleAnimEnabled:Set(AnimConfig.Enabled == true, true)
-		toggleReduceMotion:Set(AnimConfig.ReduceMotion == true, true)
-		ddAnimEffect:Set(AnimConfig.Effect, true)
-		ddAnimStyle:Set(AnimConfig.Style, true)
-		sliderAnimSpeed:Set(AnimConfig.Speed, true)
-		sliderAnimIntensity:Set(AnimConfig.Intensity, true)
-		syncCategoryControls()
-	end
-	local function syncMonitorControls()
-		togglePerfHud:Set(self._perfHudVisible == true, true)
-		togglePerfCompact:Set(self._perfHudCompact == true, true)
-		sliderPerfInterval:Set(PerfMonitor.Interval, true)
-	end
 
 	tab:AddSection({ Text = "Configuracoes", Icon = "save" })
 	local configStatus = tab:AddLabel({
@@ -5691,8 +5711,6 @@ function Window:_buildSettings()
 	self._settingsControls = {
 		Compact = toggleCompact, Sidebar = toggleSidebar,
 		LowPerformance = toggleLow, SyncAccent = syncAccent, ConfigStatus = configStatus,
-		SyncAnimations = syncAnimationsControls, SyncMonitor = syncMonitorControls,
-		PerfLabels = { Main = perfMainLabel, Stats = perfStatsLabel, Detail = perfDetailLabel },
 	}
 end
 
@@ -5798,67 +5816,6 @@ local function deserializeConfigValue(val)
 	return val
 end
 
-local function serializeAnimConfig()
-	local cats = {}
-	for _, key in ipairs(AnimCategoryOrder) do
-		local c = AnimConfig.Categories[key]
-		if c then
-			cats[key] = {
-				Enabled = c.Enabled == true,
-				Effect = tostring(c.Effect or "Fade+Scale"),
-				Speed = tonumber(c.Speed) or 1,
-				Style = tostring(c.Style or "Auto"),
-				Direction = tostring(c.Direction or "Out"),
-				Intensity = tonumber(c.Intensity) or 1,
-			}
-		end
-	end
-	return {
-		Enabled = AnimConfig.Enabled == true,
-		ReduceMotion = AnimConfig.ReduceMotion == true,
-		Speed = tonumber(AnimConfig.Speed) or 1,
-		Style = tostring(AnimConfig.Style or "Auto"),
-		Direction = tostring(AnimConfig.Direction or "Out"),
-		Intensity = tonumber(AnimConfig.Intensity) or 1,
-		Effect = tostring(AnimConfig.Effect or "Fade+Scale"),
-		Categories = cats,
-	}
-end
-
-local function refreshAllWindowsAnimations()
-	for _, win in ipairs(Windows) do
-		if win._state ~= "Destroyed" then
-			win:_applyPerformance()
-		end
-	end
-end
-
-local function applyAnimConfigTable(tbl, skipRefresh)
-	if typeof(tbl) ~= "table" then return end
-	if typeof(tbl.Enabled) == "boolean" then AnimConfig.Enabled = tbl.Enabled end
-	if typeof(tbl.ReduceMotion) == "boolean" then AnimConfig.ReduceMotion = tbl.ReduceMotion end
-	if tonumber(tbl.Speed) then AnimConfig.Speed = math.clamp(tonumber(tbl.Speed), 0.25, 4) end
-	if tonumber(tbl.Intensity) then AnimConfig.Intensity = math.clamp(tonumber(tbl.Intensity), 0, 2) end
-	if tbl.Style ~= nil then AnimConfig.Style = normalizeStyleName(tbl.Style, true) end
-	if tbl.Direction ~= nil then AnimConfig.Direction = normalizeDirectionName(tbl.Direction) end
-	if tbl.Effect ~= nil then AnimConfig.Effect = normalizeEffectName(tbl.Effect) end
-	if typeof(tbl.Categories) == "table" then
-		for rawKey, rawCat in pairs(tbl.Categories) do
-			local key = resolveCategoryKey(rawKey)
-			local target = key and AnimConfig.Categories[key]
-			if target and typeof(rawCat) == "table" then
-				if typeof(rawCat.Enabled) == "boolean" then target.Enabled = rawCat.Enabled end
-				if tonumber(rawCat.Speed) then target.Speed = math.clamp(tonumber(rawCat.Speed), 0.25, 4) end
-				if tonumber(rawCat.Intensity) then target.Intensity = math.clamp(tonumber(rawCat.Intensity), 0, 2) end
-				if rawCat.Style ~= nil then target.Style = normalizeStyleName(rawCat.Style, true) end
-				if rawCat.Direction ~= nil then target.Direction = normalizeDirectionName(rawCat.Direction) end
-				if rawCat.Effect ~= nil then target.Effect = normalizeEffectName(rawCat.Effect) end
-			end
-		end
-	end
-	if not skipRefresh then refreshAllWindowsAnimations() end
-end
-
 function Window:_resolveConfigPath(fileName)
 	local folder = sanitizeFileName(self._configFolder or self._guiName or "AetherUI")
 	local file = sanitizeFileName(fileName or self._configFile or "default")
@@ -5875,13 +5832,8 @@ function Window:ExportConfig(asTable)
 			Accent = serializeConfigValue(State.Accent),
 			Compact = self._compact == true,
 			LowPerformance = State.LowPerformance == true,
+			SmartPerformance = SmartPerf.Enabled == true,
 			Favorites = self:GetFavorites(),
-			Animations = serializeAnimConfig(),
-			PerformanceMonitor = {
-				Visible = self._perfHudVisible == true,
-				Compact = self._perfHudCompact == true,
-				Interval = PerfMonitor.Interval,
-			},
 		},
 		Flags = {},
 	}
@@ -5920,14 +5872,8 @@ function Window:ImportConfig(dataOrJson, silent)
 		end
 		if typeof(meta.Compact) == "boolean" then self:SetCompact(meta.Compact) end
 		if typeof(meta.LowPerformance) == "boolean" then AetherUI.SetLowPerformance(meta.LowPerformance) end
+		if typeof(meta.SmartPerformance) == "boolean" then AetherUI.SetSmartPerformance(meta.SmartPerformance) end
 		if typeof(meta.Favorites) == "table" then self:SetFavorites(meta.Favorites) end
-		if typeof(meta.Animations) == "table" then applyAnimConfigTable(meta.Animations, false) end
-		if typeof(meta.PerformanceMonitor) == "table" then
-			local pm = meta.PerformanceMonitor
-			if tonumber(pm.Interval) then AetherUI.SetPerformanceMonitorInterval(pm.Interval) end
-			if typeof(pm.Compact) == "boolean" then self:SetPerformanceMonitorCompact(pm.Compact) end
-			if typeof(pm.Visible) == "boolean" then self:SetPerformanceMonitorVisible(pm.Visible) end
-		end
 	end
 
 	local flagsData = typeof(decoded.Flags) == "table" and decoded.Flags or decoded
@@ -6026,19 +5972,11 @@ function Window:LoadConfiguration(fileName, silent) return self:LoadConfig(fileN
 function Window:DeleteConfiguration(fileName) return self:DeleteConfig(fileName) end
 function Window:ListConfigurations() return self:ListConfigs() end
 
-function Window:_perfHudSize()
-	local mobile = self._metrics and self._metrics.Mobile
-	if self._perfHudCompact then
-		return Vector2.new(mobile and 188 or 204, 58)
-	end
-	return Vector2.new(mobile and 220 or 236, 118)
-end
-
 function Window:_needsPerfUpdates()
 	if self._state == "Destroyed" then return false end
-	if self._perfHudVisible == true then return true end
 	local openWindow = self._state == "Open" or self._state == "Opening" or self._state == "Restoring"
-	if openWindow and self._settingsTab and self._selectedTab == self._settingsTab then
+	if not openWindow or (self._root and not self._root.Visible) then return false end
+	if self._menuTab and self._selectedTab == self._menuTab then
 		return true
 	end
 	return false
@@ -6049,251 +5987,70 @@ function Window:_updatePerfViews()
 	local st = PerfMonitor.Stats
 	local fpsColor = st.FPS >= 50 and Theme.Success or (st.FPS >= 30 and Theme.Warning or Theme.Danger)
 
-	local labels = self._settingsControls and self._settingsControls.PerfLabels
-	if labels then
-		if labels.Main then
-			labels.Main:SetText(string.format("FPS: %d (%.1f ms)  •  Uptime: %s", st.FPS, st.FrameTimeMs, formatDurationClock(st.Uptime)))
-		end
-		if labels.Stats then
-			labels.Stats:SetText(string.format("Elementos: %d  •  Tweens: %d  •  Mem: %.1f MB", st.ActiveElements, st.ActiveTweens, st.MemoryMB))
-		end
-		if labels.Detail then
-			labels.Detail:SetText(string.format("GuiObjects: %d  •  Conexoes: %d  •  Janelas: %d", st.GuiObjects, st.Connections, st.Windows))
-		end
-	end
+	local menu = self._menuControls
+	if menu then
+		menu.FpsVal.Text = string.format("%d", st.FPS)
+		menu.FpsVal.TextColor3 = fpsColor
+		menu.FpsSub.Text = string.format("%.1f ms", st.FrameTimeMs)
 
-	local refs = self._perfHudRefs
-	if refs then
-		refs.FpsText.Text = string.format("%d FPS", st.FPS)
-		refs.FpsText.TextColor3 = fpsColor
-		refs.FpsDot.BackgroundColor3 = fpsColor
-		refs.MsText.Text = string.format("%.1f ms", st.FrameTimeMs)
-		refs.UptimeVal.Text = formatDurationClock(st.Uptime)
-		refs.ElementsVal.Text = string.format("%d (%d gui)", st.ActiveElements, st.GuiObjects)
-		refs.TweensVal.Text = string.format("%d / %d", st.ActiveTweens, st.Connections)
-		refs.MemVal.Text = string.format("%.1f MB", st.MemoryMB)
-		refs.CompactLine.Text = string.format("Up %s  •  Elem %d  •  %.0f MB", formatDurationClock(st.Uptime), st.ActiveElements, st.MemoryMB)
-	end
-end
-
-function Window:_buildPerfHud(initialVisible, initialCompact)
-	self._perfHudVisible = initialVisible == true
-	self._perfHudCompact = initialCompact == true
-	local sz = self:_perfHudSize()
-	local viewport = getViewport()
-	local insetTop = getGuiInset().Y
-	local startPos = clampHudPosition(UDim2.fromOffset(viewport.X - sz.X - 14, insetTop + 12), sz)
-
-	local hud = create("CanvasGroup", {
-		Name = "PerformanceHUD",
-		Position = startPos,
-		Size = UDim2.fromOffset(sz.X, sz.Y),
-		BackgroundColor3 = Theme.Surface,
-		BackgroundTransparency = Glass.Card,
-		GroupTransparency = self._perfHudVisible and 0 or 1,
-		Visible = self._perfHudVisible,
-		Active = true,
-		ZIndex = 35,
-		Parent = self._gui,
-	})
-	addCorner(hud, 11)
-	local hudStroke = addStroke(hud, Theme.Stroke, 0.25, 1)
-	local hudScale = create("UIScale", { Scale = self._perfHudVisible and 1 or 0.9, Parent = hud })
-
-	local header = create("Frame", {
-		Name = "Header", BackgroundTransparency = 1,
-		Size = UDim2.new(1, 0, 0, 26), Active = true, Parent = hud,
-	})
-	local fpsDot = create("Frame", {
-		Name = "Dot", AnchorPoint = Vector2.new(0, 0.5),
-		Position = UDim2.new(0, 10, 0.5, 0),
-		Size = UDim2.fromOffset(7, 7), BackgroundColor3 = Theme.Success, Parent = header,
-	})
-	addCornerScale(fpsDot, 0.5)
-	local fpsText = create("TextLabel", {
-		Name = "FPS", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(22, 0), Size = UDim2.fromOffset(64, 26),
-		Text = "60 FPS", Font = Theme.FontBold, TextSize = 12,
-		TextColor3 = Theme.Success, TextXAlignment = Enum.TextXAlignment.Left, Parent = header,
-	})
-	local msText = create("TextLabel", {
-		Name = "MS", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(82, 0), Size = UDim2.new(1, -134, 0, 26),
-		Text = "16.7 ms", Font = Theme.Font, TextSize = 10,
-		TextColor3 = Theme.SubText, TextXAlignment = Enum.TextXAlignment.Left, Parent = header,
-	})
-
-	local compactBtn = create("TextButton", {
-		Name = "ToggleSize", AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -28, 0.5, 0), Size = UDim2.fromOffset(20, 20),
-		BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.2,
-		AutoButtonColor = false, Text = self._perfHudCompact and "+" or "-",
-		Font = Theme.FontBold, TextSize = 12, TextColor3 = Theme.SubText, Parent = header,
-	})
-	addCorner(compactBtn, 6)
-
-	local closeHudBtn = create("TextButton", {
-		Name = "CloseHUD", AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -6, 0.5, 0), Size = UDim2.fromOffset(20, 20),
-		BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.2,
-		AutoButtonColor = false, Text = "x",
-		Font = Theme.FontBold, TextSize = 11, TextColor3 = Theme.SubText, Parent = header,
-	})
-	addCorner(closeHudBtn, 6)
-
-	local accentBar = create("Frame", {
-		Name = "Line", Position = UDim2.fromOffset(0, 26),
-		Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = accent(), BackgroundTransparency = 0.45, Parent = hud,
-	})
-
-	local compactLine = create("TextLabel", {
-		Name = "CompactInfo", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(10, 30), Size = UDim2.new(1, -20, 0, 22),
-		Text = "Up 00:00  •  Elem 0  •  0 MB", Font = Theme.Font, TextSize = 11,
-		TextColor3 = Theme.SubText, TextXAlignment = Enum.TextXAlignment.Left,
-		TextTruncate = Enum.TextTruncate.AtEnd, Visible = self._perfHudCompact, Parent = hud,
-	})
-
-	local grid = create("Frame", {
-		Name = "Grid", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(10, 32), Size = UDim2.new(1, -20, 1, -38),
-		Visible = not self._perfHudCompact, Parent = hud,
-	})
-
-	local function makeCell(titleStr, xScale, yOffset)
-		local box = create("Frame", {
-			BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.45,
-			Position = UDim2.new(xScale, xScale > 0 and 3 or 0, 0, yOffset),
-			Size = UDim2.new(0.5, -3, 0, 36), Parent = grid,
-		})
-		addCorner(box, 7)
-		create("TextLabel", {
-			BackgroundTransparency = 1, Position = UDim2.fromOffset(7, 3),
-			Size = UDim2.new(1, -14, 0, 12), Text = titleStr,
-			Font = Theme.FontBold, TextSize = 9, TextColor3 = Theme.Muted,
-			TextXAlignment = Enum.TextXAlignment.Left, Parent = box,
-		})
-		local val = create("TextLabel", {
-			BackgroundTransparency = 1, Position = UDim2.fromOffset(7, 16),
-			Size = UDim2.new(1, -14, 0, 16), Text = "-",
-			Font = Theme.FontBold, TextSize = 11, TextColor3 = Theme.Text,
-			TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, Parent = box,
-		})
-		return val
-	end
-
-	local uptimeVal = makeCell("UPTIME", 0, 0)
-	local elementsVal = makeCell("ELEMENTOS", 0.5, 0)
-	local tweensVal = makeCell("TWEENS / CONX", 0, 42)
-	local memVal = makeCell("MEMORIA", 0.5, 42)
-
-	self._perfHud = hud
-	self._perfHudScale = hudScale
-	self._perfHudRefs = {
-		FpsDot = fpsDot, FpsText = fpsText, MsText = msText,
-		CompactBtn = compactBtn, CompactLine = compactLine, Grid = grid,
-		UptimeVal = uptimeVal, ElementsVal = elementsVal, TweensVal = tweensVal, MemVal = memVal,
-	}
-
-	makeDraggable(hud, hud, self._connections, {
-		Clamp = function(pos) return clampHudPosition(pos, self:_perfHudSize()) end,
-	})
-
-	compactBtn.Activated:Connect(function()
-		self:SetPerformanceMonitorCompact(not (self._perfHudCompact == true))
-	end)
-	closeHudBtn.Activated:Connect(function()
-		self:SetPerformanceMonitorVisible(false)
-	end)
-	self:_onAccent(function(animate)
-		setProps(accentBar, { BackgroundColor3 = accent() }, animate, Anim.Normal)
-		setProps(hudStroke, { Color = State.LowPerformance and Theme.Stroke or Theme.Stroke }, animate, Anim.Normal)
-	end)
-end
-
-function Window:SetPerformanceMonitorVisible(value)
-	value = value == true
-	if self._state == "Destroyed" or self._perfHudVisible == value then return end
-	self._perfHudVisible = value
-	local hud = self._perfHud
-	local hudScale = self._perfHudScale
-	if hud then
-		local pCfg = resolveAnim("Panels", Anim.Fast)
-		if value then
-			local sz = self:_perfHudSize()
-			local targetPos = clampHudPosition(hud.Position, sz)
-			hud.Size = UDim2.fromOffset(sz.X, sz.Y)
-			hud.Position = targetPos
-			hud.Visible = true
-			if pCfg.Active then
-				hud.GroupTransparency = pCfg.Fade and 1 or 0
-				if hudScale then
-					hudScale.Scale = pCfg.Scale and math.max(0.78, 1 - 0.14 * pCfg.Intensity) or 1
-					tween(hudScale, Anim.Normal, { Scale = 1 }, nil, nil, "Panels")
-				end
-				if pCfg.Slide then
-					hud.Position = targetPos + UDim2.fromOffset(0, math.round(-10 * pCfg.Intensity))
-				end
-				tween(hud, Anim.Normal, { GroupTransparency = 0, Position = targetPos }, nil, nil, "Panels")
-			else
-				hud.GroupTransparency = 0
-				if hudScale then hudScale.Scale = 1 end
-			end
+		if st.PingMs >= 0 then
+			local pingColor = st.PingMs <= 90 and Theme.Success or (st.PingMs <= 160 and Theme.Warning or Theme.Danger)
+			menu.PingVal.Text = string.format("%d ms", st.PingMs)
+			menu.PingVal.TextColor3 = pingColor
+			menu.PingSub.Text = st.PingMs <= 90 and "Estavel" or (st.PingMs <= 160 and "Moderado" or "Alto")
 		else
-			if pCfg.Active then
-				local hideProps = { GroupTransparency = pCfg.Fade and 1 or 0 }
-				if pCfg.Slide then
-					hideProps.Position = hud.Position + UDim2.fromOffset(0, math.round(-8 * pCfg.Intensity))
-				end
-				if hudScale and pCfg.Scale then
-					tween(hudScale, Anim.Fast, { Scale = math.max(0.78, 1 - 0.14 * pCfg.Intensity) }, nil, nil, "Panels")
-				end
-				local t = tween(hud, Anim.Fast, hideProps, nil, nil, "Panels")
-				t.Completed:Connect(function()
-					if not self._perfHudVisible and hud.Parent then
-						hud.Visible = false
-						hud.Position = clampHudPosition(hud.Position, self:_perfHudSize())
-					end
-				end)
+			menu.PingVal.Text = "-- ms"
+			menu.PingVal.TextColor3 = Theme.SubText
+			menu.PingSub.Text = "Local"
+		end
+
+		menu.UptimeVal.Text = formatDurationClock(st.Uptime)
+		menu.UptimeSub.Text = string.format("%.0f MB", st.MemoryMB)
+
+		local hist = PerfMonitor.History
+		local count = #hist
+		local maxCap = #menu.GraphBars
+		if count > 0 then
+			menu.GraphSummary.Text = string.format("Min %d  •  Med %d  •  Max %d", st.MinFPS, st.AvgFPS, st.MaxFPS)
+		else
+			menu.GraphSummary.Text = "Aguardando amostras..."
+		end
+		local ceiling = math.max(70, st.MaxFPS + 8)
+		local offset = math.max(0, maxCap - count)
+		for i = 1, maxCap do
+			local bar = menu.GraphBars[i]
+			local sampleIdx = i - offset
+			if sampleIdx >= 1 and hist[sampleIdx] then
+				local val = hist[sampleIdx]
+				local ratio = math.clamp(val / ceiling, 0.08, 1)
+				local barColor = val >= 50 and Theme.Success or (val >= 30 and Theme.Warning or Theme.Danger)
+				bar.Visible = true
+				bar.Size = UDim2.new(1 / maxCap, -2, ratio, 0)
+				bar.BackgroundColor3 = barColor
+				bar.BackgroundTransparency = (i == maxCap) and 0.05 or 0.25
 			else
-				hud.Visible = false
-				hud.GroupTransparency = 1
+				bar.Visible = true
+				bar.Size = UDim2.new(1 / maxCap, -2, 0.06, 0)
+				bar.BackgroundColor3 = Theme.Muted
+				bar.BackgroundTransparency = 0.72
 			end
 		end
-	end
-	refreshPerfSubscription()
-	if value then
-		samplePerfSnapshot(nil, nil)
-		self:_updatePerfViews()
-	end
-	self:_syncSettings()
-end
 
-function Window:GetPerformanceMonitorVisible()
-	return self._perfHudVisible == true
-end
-
-function Window:TogglePerformanceMonitor()
-	self:SetPerformanceMonitorVisible(not (self._perfHudVisible == true))
-end
-
-function Window:SetPerformanceMonitorCompact(value)
-	value = value == true
-	if self._state == "Destroyed" or self._perfHudCompact == value then return end
-	self._perfHudCompact = value
-	local hud, refs = self._perfHud, self._perfHudRefs
-	if hud and refs then
-		local sz = self:_perfHudSize()
-		local clampedPos = clampHudPosition(hud.Position, sz)
-		refs.CompactLine.Visible = value
-		refs.Grid.Visible = not value
-		refs.CompactBtn.Text = value and "+" or "-"
-		tween(hud, Anim.Fast, {
-			Size = UDim2.fromOffset(sz.X, sz.Y),
-			Position = clampedPos,
-		}, nil, nil, "Panels")
+		local sp = SmartPerf.Stats
+		if sp.Enabled then
+			menu.SmartDot.BackgroundColor3 = Theme.Success
+			menu.SmartHeader.Text = string.format("Anti-Lag Ativo  •  Perfil %s", sp.Profile)
+			menu.SmartZones.Text = string.format("Perto: %d  •  Medio: %d  •  Longe: %d", sp.NearCount, sp.MidCount, sp.FarCount)
+			menu.SmartDetail.Text = string.format("Otimizados: %d  •  Cache: %d  •  Raios: %d / %d st", sp.OptimizedCount, sp.CachedCount, sp.NearRadius, sp.FarRadius)
+			menu.SmartStroke.Color = accent()
+		else
+			menu.SmartDot.BackgroundColor3 = Theme.Muted
+			menu.SmartHeader.Text = "Anti-Lag por Distancia: Inativo"
+			menu.SmartZones.Text = "Preserva objetos proximos e aplica LOD apenas a distancia"
+			menu.SmartDetail.Text = "Otimizados: 0  •  Cache: 0  •  Zonas dinamicas"
+			menu.SmartStroke.Color = Theme.StrokeSoft
+		end
 	end
-	self:_syncSettings()
 end
 
 function Window:GetPerformanceStats()
