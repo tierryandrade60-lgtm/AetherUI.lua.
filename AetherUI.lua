@@ -8,16 +8,19 @@
 	        e animacoes nativas padronizadas.
 	Cole TODO este arquivo em um unico ModuleScript ou carregue via loadstring.
 
-	v2.9.0 (Aba Menu + Smart Performance Anti-Lag + Animacoes Padronizadas):
+	v2.9.0 (Aba Menu + Smart Performance Anti-Lag Avancado + Animacoes Padronizadas):
 	  - Nova aba Menu: FPS em tempo real, Ping em tempo real, Uptime da biblioteca,
-	    Grafico de desempenho com historico de FPS e Smart Performance.
-	  - Smart Performance (Anti-Lag avancado baseado em distancia): preserva 100%
-	    objetos proximos, personagens, ferramentas, colisoes, fisica, efeitos e
-	    objetos interativos; aplica LOD e reducao gradual de custo visual em zonas
-	    intermediaria e distante com histerese anti-oscilacao, cache espacial,
-	    lotes com orcamento de frame e restauracao total ao desativar.
+	    Grafico de desempenho com historico de FPS e Smart Performance configuravel.
+	  - Smart Performance (Anti-Lag adaptativo por distancia, visibilidade e contexto):
+	    * Frustum/Visibility Culling (LocalTransparencyModifier, Decals, Textures,
+	      imagens 3D, luzes e efeitos fora da visao ou muito distantes).
+	    * Sistema de Protecao de Combate: prioriza habilidades, poderes, projeteis,
+	      explosoes, auras, ferramentas e personagens em combate.
+	    * Reducao gradual de qualidade/taxa em particulas, luzes, Trails, Beams e
+	      personagens distantes + hibernacao segura de efeitos temporarios finalizados.
+	    * Escalonamento continuo por FPS/sobrecarga sem oscilacoes e restauracao 1:1.
 	  - Animacoes nativas padronizadas internamente (janela, hover, abas, sidebar,
-	    bolinha e notificacoes) sem menus extras.
+	    bolinha e notificacoes) sem menus de personalizacao.
 
 	v2.7.0 (Mobile + Bolinha + ColorPicker + RadioGroup + Save Config + Icones):
 	  - Floating Ball (Bolinha): aparece SOMENTE quando o painel principal esta
@@ -397,48 +400,89 @@ local function pushFpsHistory(fps)
 end
 
 -- ===================================================================
--- Smart Performance (Anti-Lag avancado baseado em distancia & LOD)
--- Restricoes obrigatorias respeitadas integralmente:
---   * NUNCA remove, destroi, oculta ou desativa particulas, Trails,
---     Beams, luzes, sombras, texturas, decals ou efeitos especiais.
---   * NUNCA modifica objetos proximos, personagens, ferramentas,
---     colisoes, fisica, objetos interativos ou mecanicas do jogo.
---   * Local, reversivel e sem alteracoes permanentes no mapa.
+-- Smart Performance v2 (Anti-Lag por Distancia, Culling & Contexto)
+--   * Local, reversivel e sem destruicao de objetos do jogo (:Destroy).
+--   * Protecao de Combate: preserva habilidades, projeteis, auras,
+--     explosoes, ferramentas e personagens proximos ou em combate.
+--   * Culling de Visibilidade (Frustum) + Distancia + Histerese + Lotes.
+--   * Escalonamento assimetrico por FPS/Sobrecarga (sem oscilacao).
 -- ===================================================================
 local SmartPerf = {
 	Enabled = false,
+	Config = {
+		Mode = "Automatico", -- Automatico | Leve | Equilibrado | Agressivo | Ultra
+		FrustumCulling = true,
+		CombatProtection = true,
+		EffectOptimization = true,
+		EffectCleanup = true,
+		CharacterOptimization = true,
+		TargetFPS = 55,
+	},
 	Cache = {},
 	EntryMap = {},
 	Modified = {},
+	CharacterModels = {},
+	AnimOrig = setmetatable({}, { __mode = "k" }),
 	Cursor = 1,
+	RestoreCursor = 1,
+	RestoreList = {},
 	ScanQueue = nil,
 	ScanIndex = 1,
 	ScanDone = true,
 	Conns = {},
 	HeartbeatConn = nil,
 	StepAccum = 0,
+	RestoreAccum = 0,
+	ContextAccum = 0,
 	LastPlayerPos = nil,
 	LastCamPos = nil,
+	LastCamLook = nil,
 	SmoothFps = 60,
+	SpikeScore = 0,
+	LastOverloadAt = 0,
+	LocalCombatUntil = 0,
+	LastLocalHp = nil,
 	Stress = 0,
+	Intensity = 0,
 	NearRadius = 130,
 	FarRadius = 290,
+	CullRadius = 460,
 	Stats = {
 		Enabled = false,
+		Mode = "Automatico",
 		Profile = "Inativo",
+		IntensityPct = 0,
 		NearCount = 0,
 		MidCount = 0,
 		FarCount = 0,
+		CulledCount = 0,
+		ProtectedCount = 0,
+		CleanedCount = 0,
 		OptimizedCount = 0,
 		CachedCount = 0,
 		NearRadius = 130,
 		FarRadius = 290,
+		CullRadius = 460,
 	},
 }
 
 local SMART_HYSTERESIS = 18
 local SMART_MIN_DWELL = 1.25
 local SMART_STEP_BUDGET = 0.0014
+local SMART_RESTORE_BUDGET = 0.0007
+
+local SmartCombatKeywords = {
+	"attack", "skill", "ability", "spell", "magic", "power", "aura",
+	"slash", "dash", "combo", "hit", "beam", "laser", "blast", "proj",
+	"bullet", "missile", "rocket", "fireball", "meteor", "explo",
+	"shockwave", "parry", "block", "shield", "dodge", "ult", "domain",
+	"boss", "combat", "weapon", "sword", "gun", "katana", "clash",
+	"burst", "thunder", "lightning", "heal", "buff", "hitbox", "hurtbox",
+}
+
+local SmartTempContainerKeywords = {
+	"debris", "effect", "vfx", "fx", "temp", "particles", "splatter", "smoke",
+}
 
 local SmartProceduralMaterials = {
 	[Enum.Material.Brick] = true,
@@ -470,23 +514,73 @@ pcall(function()
 	end
 end)
 
-local function isCharacterOrTool(inst)
-	local node = inst
-	while node and node ~= workspace do
-		if node:IsA("Tool") or node:IsA("HopperBin") or node:IsA("Accessory") then
+local function nameMatchesList(nameStr, list)
+	if not nameStr or nameStr == "" then return false end
+	local lower = string.lower(nameStr)
+	for _, kw in ipairs(list) do
+		if string.find(lower, kw, 1, true) then
 			return true
 		end
+	end
+	return false
+end
+
+local function hasCombatTagOrName(inst)
+	if inst:IsA("Explosion") then return true end
+	local node = inst
+	local depth = 0
+	while node and node ~= workspace and depth < 4 do
+		if nameMatchesList(node.Name, SmartCombatKeywords) then
+			return true
+		end
+		local okAttr, attr = pcall(function() return node:GetAttribute("Combat") or node:GetAttribute("Skill") end)
+		if okAttr and attr == true then return true end
+		node = node.Parent
+		depth = depth + 1
+	end
+	return false
+end
+
+local function isInTempContainer(inst)
+	local node = inst.Parent
+	local depth = 0
+	while node and node ~= workspace and depth < 3 do
+		if nameMatchesList(node.Name, SmartTempContainerKeywords) then
+			return true
+		end
+		node = node.Parent
+		depth = depth + 1
+	end
+	return false
+end
+
+local function findCharacterAncestor(inst)
+	local node = inst
+	while node and node ~= workspace do
 		if node:IsA("Model") then
 			if node:FindFirstChildOfClass("Humanoid") or node:FindFirstChildOfClass("AnimationController") then
-				return true
+				return node
 			end
 			for _, plr in ipairs(Players:GetPlayers()) do
-				if plr.Character == node then return true end
+				if plr.Character == node then return node end
 			end
 		end
 		node = node.Parent
 	end
-	return false
+	return nil
+end
+
+local function isToolOrAccessory(inst)
+	local node = inst
+	while node and node ~= workspace do
+		if node:IsA("Tool") or node:IsA("HopperBin") then
+			return "Tool"
+		elseif node:IsA("Accessory") then
+			return "Accessory"
+		end
+		node = node.Parent
+	end
+	return nil
 end
 
 local function hasInteractiveOrSurfaceChild(inst)
@@ -497,10 +591,16 @@ local function hasInteractiveOrSurfaceChild(inst)
 			or child:IsA("TouchTransmitter")
 			or child:IsA("Dialog")
 			or child:IsA("Seat")
-			or child:IsA("VehicleSeat")
-			or child:IsA("SurfaceAppearance")
-			or child:IsA("Texture")
-			or child:IsA("Decal") then
+			or child:IsA("VehicleSeat") then
+			return "Interactive"
+		end
+	end
+	return nil
+end
+
+local function hasSurfaceTextures(inst)
+	for _, child in ipairs(inst:GetChildren()) do
+		if child:IsA("SurfaceAppearance") or child:IsA("Texture") or child:IsA("Decal") then
 			return true
 		end
 	end
@@ -514,13 +614,37 @@ local function hasInteractiveDescendant(inst)
 			or desc:IsA("DragDetector")
 			or desc:IsA("TouchTransmitter")
 			or desc:IsA("Seat")
-			or desc:IsA("VehicleSeat")
-			or desc:IsA("Humanoid")
-			or desc:IsA("AnimationController") then
+			or desc:IsA("VehicleSeat") then
 			return true
 		end
 	end
 	return false
+end
+
+local function getPartPositionSafe(inst)
+	if not inst or not inst.Parent then return nil end
+	if inst:IsA("BasePart") then return inst.Position end
+	if inst:IsA("Attachment") then
+		local ok, wp = pcall(function() return inst.WorldPosition end)
+		if ok then return wp end
+	end
+	if inst:IsA("Model") then
+		local pp = inst.PrimaryPart
+		if pp and pp.Parent then return pp.Position end
+		local okBox, cf = pcall(function() return inst:GetBoundingBox() end)
+		if okBox and typeof(cf) == "CFrame" then return cf.Position end
+	end
+	return nil
+end
+
+local function resolveAnchorPos(inst)
+	local node = inst
+	while node and node ~= workspace do
+		local pos = getPartPositionSafe(node)
+		if pos then return node, pos end
+		node = node.Parent
+	end
+	return nil, nil
 end
 
 local function classifySmartTarget(inst)
@@ -528,40 +652,153 @@ local function classifySmartTarget(inst)
 	if SmartPerf.EntryMap[inst] then return nil end
 	if inst:IsA("Terrain") or inst:IsA("Camera") then return nil end
 
-	if inst:IsA("SurfaceGui") then
-		local parent = inst.Adornee or inst.Parent
-		if not parent or not parent:IsA("BasePart") or isCharacterOrTool(parent) then return nil end
-		local okMode, mode = pcall(function() return inst.SizingMode end)
-		if okMode and mode ~= Enum.SurfaceGuiSizingMode.PixelsPerStud then return nil end
-		return {
-			Inst = inst, Kind = "SurfaceGui", AnchorPart = parent,
-			Pos = parent.Position,
-			Radius = math.min(parent.Size.Magnitude * 0.5, 90),
-			Tier = 0, LastSwitch = 0, Orig = nil,
-		}
+	local charModel = findCharacterAncestor(inst)
+	local localChar = Players.LocalPlayer and Players.LocalPlayer.Character
+	local isLocalChar = charModel ~= nil and charModel == localChar
+	local attachKind = isToolOrAccessory(inst)
+	if isLocalChar or attachKind == "Tool" then
+		-- Jogador local e ferramentas nunca sao otimizados/ocultos
+		return nil
 	end
 
-	if inst:IsA("Model") then
-		if isCharacterOrTool(inst) or hasInteractiveDescendant(inst) then return nil end
+	local combatTagged = hasCombatTagOrName(inst)
+	local now = os.clock()
+
+	-- Personagem remoto / NPC (somente raiz Model para gerenciar animacao + partes)
+	if inst:IsA("Model") and (inst:FindFirstChildOfClass("Humanoid") or inst:FindFirstChildOfClass("AnimationController")) then
 		local okBox, cf, sz = pcall(function() return inst:GetBoundingBox() end)
 		if not okBox or typeof(cf) ~= "CFrame" then return nil end
+		local hum = inst:FindFirstChildOfClass("Humanoid")
+		local animCtrl = hum or inst:FindFirstChildOfClass("AnimationController")
+		local animator = animCtrl and animCtrl:FindFirstChildOfClass("Animator") or nil
+		local meta = {
+			Model = inst,
+			Humanoid = hum,
+			Animator = animator,
+			LastHp = hum and hum.Health or nil,
+			CombatUntil = 0,
+			InCombat = false,
+		}
+		SmartPerf.CharacterModels[inst] = meta
 		return {
-			Inst = inst, Kind = "Model",
-			Pos = cf.Position,
-			Radius = math.min(sz.Magnitude * 0.5, 160),
-			Tier = 0, LastSwitch = 0, Orig = nil,
+			Inst = inst, Kind = "Character", CharModel = inst, Priority = "High",
+			Pos = cf.Position, Radius = math.min(sz.Magnitude * 0.5, 24),
+			Tier = 0, LastSwitch = 0, CreatedAt = now, Orig = nil,
 		}
 	end
 
+	-- Particulas, Trails, Beams, Fire, Smoke, Sparkles, Explosions
+	if inst:IsA("ParticleEmitter") or inst:IsA("Trail") or inst:IsA("Beam")
+		or inst:IsA("Fire") or inst:IsA("Smoke") or inst:IsA("Sparkles") or inst:IsA("Explosion") then
+		local anchor, pos = resolveAnchorPos(inst.Parent)
+		if not anchor or not pos then return nil end
+		local radius = anchor:IsA("BasePart") and math.min(anchor.Size.Magnitude * 0.5, 60) or 12
+		local kind = inst:IsA("ParticleEmitter") and "Particle"
+			or (inst:IsA("Beam") and "Beam")
+			or (inst:IsA("Trail") and "Trail")
+			or (inst:IsA("Explosion") and "Explosion")
+			or "TempFx"
+		local prio = (combatTagged or kind == "Explosion") and "Critical" or (charModel and "High" or "Normal")
+		return {
+			Inst = inst, Kind = kind, Anchor = anchor, CharModel = charModel,
+			Priority = prio, CombatProtected = combatTagged or kind == "Explosion",
+			IsTemp = isInTempContainer(inst) or kind == "Explosion",
+			DisabledSince = nil, Pos = pos, Radius = radius,
+			Tier = 0, LastSwitch = 0, CreatedAt = now, Orig = nil,
+		}
+	end
+
+	-- Luzes dinamicas
+	if inst:IsA("PointLight") or inst:IsA("SpotLight") or inst:IsA("SurfaceLight") then
+		local anchor, pos = resolveAnchorPos(inst.Parent)
+		if not anchor or not pos then return nil end
+		local rangeVal = 16
+		pcall(function() rangeVal = inst.Range end)
+		local prio = combatTagged and "Critical" or (charModel and "High" or "Normal")
+		return {
+			Inst = inst, Kind = "Light", Anchor = anchor, CharModel = charModel,
+			Priority = prio, CombatProtected = combatTagged,
+			Pos = pos, Radius = math.min(rangeVal, 75),
+			Tier = 0, LastSwitch = 0, CreatedAt = now, Orig = nil,
+		}
+	end
+
+	-- Decals & Textures
+	if inst:IsA("Decal") or inst:IsA("Texture") then
+		local parent = inst.Parent
+		if not parent or not parent:IsA("BasePart") then return nil end
+		local prio = combatTagged and "High" or "Low"
+		return {
+			Inst = inst, Kind = "Decal", Anchor = parent, CharModel = charModel,
+			Priority = prio, CombatProtected = combatTagged,
+			Pos = parent.Position, Radius = math.min(parent.Size.Magnitude * 0.5, 70),
+			Tier = 0, LastSwitch = 0, CreatedAt = now, Orig = nil,
+		}
+	end
+
+	-- Imagens em 3D UI (SurfaceGui / BillboardGui)
+	if (inst:IsA("ImageLabel") or inst:IsA("ImageButton")) and (inst:FindFirstAncestorOfClass("SurfaceGui") or inst:FindFirstAncestorOfClass("BillboardGui")) then
+		local gui3d = inst:FindFirstAncestorOfClass("SurfaceGui") or inst:FindFirstAncestorOfClass("BillboardGui")
+		local anchor = gui3d and ((gui3d.Adornee and gui3d.Adornee:IsA("BasePart") and gui3d.Adornee) or (gui3d.Parent and gui3d.Parent:IsA("BasePart") and gui3d.Parent))
+		if not anchor then return nil end
+		local prio = (combatTagged or charModel) and "High" or "Low"
+		return {
+			Inst = inst, Kind = "GuiImage", Anchor = anchor, CharModel = charModel,
+			Priority = prio, CombatProtected = combatTagged,
+			Pos = anchor.Position, Radius = math.min(anchor.Size.Magnitude * 0.5, 45),
+			Tier = 0, LastSwitch = 0, CreatedAt = now, Orig = nil,
+		}
+	end
+
+	-- SurfaceGui / BillboardGui
+	if inst:IsA("SurfaceGui") or inst:IsA("BillboardGui") then
+		local parent = inst.Adornee or inst.Parent
+		if not parent or not parent:IsA("BasePart") then return nil end
+		local isBb = inst:IsA("BillboardGui")
+		local prio = (combatTagged or charModel) and "High" or "Normal"
+		return {
+			Inst = inst, Kind = isBb and "BillboardGui" or "SurfaceGui", Anchor = parent, CharModel = charModel,
+			Priority = prio, CombatProtected = combatTagged,
+			Pos = parent.Position, Radius = math.min(parent.Size.Magnitude * 0.5, 70),
+			Tier = 0, LastSwitch = 0, CreatedAt = now, Orig = nil,
+		}
+	end
+
+	-- Models (nao personagens)
+	if inst:IsA("Model") then
+		if hasInteractiveDescendant(inst) then return nil end
+		local okBox, cf, sz = pcall(function() return inst:GetBoundingBox() end)
+		if not okBox or typeof(cf) ~= "CFrame" then return nil end
+		local radius = math.min(sz.Magnitude * 0.5, 160)
+		local prio = combatTagged and "Critical" or (radius >= 45 and "High" or "Normal")
+		return {
+			Inst = inst, Kind = "Model", CharModel = nil,
+			Priority = prio, CombatProtected = combatTagged,
+			Pos = cf.Position, Radius = radius,
+			Tier = 0, LastSwitch = 0, CreatedAt = now, Orig = nil,
+		}
+	end
+
+	-- BasePart / MeshPart
 	if inst:IsA("BasePart") then
 		if inst:IsA("Seat") or inst:IsA("VehicleSeat") or inst:IsA("SkateboardPlatform") then return nil end
-		if isCharacterOrTool(inst) or hasInteractiveOrSurfaceChild(inst) then return nil end
+		if hasInteractiveOrSurfaceChild(inst) then return nil end
+		local hasTex = hasSurfaceTextures(inst)
+		local isProjectile = inst:FindFirstChildOfClass("BodyVelocity")
+			or inst:FindFirstChildOfClass("LinearVelocity")
+			or inst:FindFirstChildOfClass("RocketPropulsion")
+		local radius = math.min(inst.Size.Magnitude * 0.5, 120)
+		local prio = (combatTagged or isProjectile) and "Critical"
+			or ((charModel or radius >= 42) and "High")
+			or ((inst.Size.Magnitude < 6 and not inst.CanCollide) and "Low" or "Normal")
 		local kind = inst:IsA("MeshPart") and "Mesh" or "Part"
 		return {
-			Inst = inst, Kind = kind,
-			Pos = inst.Position,
-			Radius = math.min(inst.Size.Magnitude * 0.5, 120),
-			Tier = 0, LastSwitch = 0, Orig = nil,
+			Inst = inst, Kind = kind, Anchor = inst, CharModel = charModel,
+			Priority = prio, CombatProtected = combatTagged or isProjectile ~= nil,
+			HasTex = hasTex, IsAccessory = attachKind == "Accessory",
+			IsMovingProjectile = isProjectile ~= nil,
+			Pos = inst.Position, Radius = radius,
+			Tier = 0, LastSwitch = 0, CreatedAt = now, Orig = nil,
 		}
 	end
 
@@ -575,6 +812,8 @@ local function captureSmartOrig(entry)
 	if entry.Kind == "Mesh" or entry.Kind == "Part" then
 		orig.Reflectance = inst.Reflectance
 		orig.Material = inst.Material
+		pcall(function() orig.CastShadow = inst.CastShadow end)
+		pcall(function() orig.LocalTransparencyModifier = inst.LocalTransparencyModifier end)
 		if entry.Kind == "Mesh" then
 			local okRf, rf = pcall(function() return inst.RenderFidelity end)
 			if okRf then orig.RenderFidelity = rf end
@@ -583,55 +822,174 @@ local function captureSmartOrig(entry)
 		local okLod, lod = pcall(function() return inst.LevelOfDetail end)
 		if okLod then orig.LevelOfDetail = lod end
 	elseif entry.Kind == "SurfaceGui" then
-		local okPps, pps = pcall(function() return inst.PixelsPerStud end)
-		if okPps then orig.PixelsPerStud = pps end
+		orig.Enabled = inst.Enabled
+		local okMode, mode = pcall(function() return inst.SizingMode end)
+		if okMode and mode == Enum.SurfaceGuiSizingMode.PixelsPerStud then
+			pcall(function() orig.PixelsPerStud = inst.PixelsPerStud end)
+		end
+	elseif entry.Kind == "BillboardGui" then
+		orig.Enabled = inst.Enabled
+		pcall(function() orig.AlwaysOnTop = inst.AlwaysOnTop end)
+	elseif entry.Kind == "GuiImage" then
+		orig.ImageTransparency = inst.ImageTransparency
+	elseif entry.Kind == "Decal" then
+		orig.Transparency = inst.Transparency
+	elseif entry.Kind == "Particle" then
+		orig.Enabled = inst.Enabled
+		orig.Rate = inst.Rate
+		pcall(function() orig.LightEmission = inst.LightEmission end)
+	elseif entry.Kind == "Beam" then
+		orig.Enabled = inst.Enabled
+		pcall(function() orig.Segments = inst.Segments end)
+		pcall(function() orig.LightEmission = inst.LightEmission end)
+	elseif entry.Kind == "Trail" then
+		orig.Enabled = inst.Enabled
+		pcall(function() orig.MaxLength = inst.MaxLength end)
+		pcall(function() orig.LightEmission = inst.LightEmission end)
+	elseif entry.Kind == "TempFx" then
+		orig.Enabled = inst.Enabled
+		if inst:IsA("Fire") then
+			pcall(function() orig.Size = inst.Size; orig.Heat = inst.Heat end)
+		elseif inst:IsA("Smoke") then
+			pcall(function() orig.Opacity = inst.Opacity; orig.Size = inst.Size end)
+		end
+	elseif entry.Kind == "Explosion" then
+		orig.Visible = inst.Visible
+	elseif entry.Kind == "Light" then
+		orig.Enabled = inst.Enabled
+		orig.Brightness = inst.Brightness
+		orig.Range = inst.Range
+		pcall(function() orig.Shadows = inst.Shadows end)
 	end
 	entry.Orig = orig
 	return orig
 end
 
+local function restoreAnimatorTracks(meta)
+	if not meta or not meta.Animator then return end
+	local ok, tracks = pcall(function() return meta.Animator:GetPlayingAnimationTracks() end)
+	if not ok or typeof(tracks) ~= "table" then return end
+	for _, track in ipairs(tracks) do
+		local origSpeed = SmartPerf.AnimOrig[track]
+		if origSpeed ~= nil then
+			pcall(function() track:AdjustSpeed(origSpeed) end)
+			SmartPerf.AnimOrig[track] = nil
+		end
+	end
+end
+
+local function applyAnimatorThrottle(meta, factor)
+	if not meta or not meta.Animator then return end
+	local ok, tracks = pcall(function() return meta.Animator:GetPlayingAnimationTracks() end)
+	if not ok or typeof(tracks) ~= "table" then return end
+	for _, track in ipairs(tracks) do
+		if track.IsPlaying then
+			local p = track.Priority
+			if p == Enum.AnimationPriority.Core or p == Enum.AnimationPriority.Idle then
+				if SmartPerf.AnimOrig[track] == nil then
+					SmartPerf.AnimOrig[track] = track.Speed
+				end
+				local target = math.max(0.15, SmartPerf.AnimOrig[track] * factor)
+				if math.abs(track.Speed - target) > 0.05 then
+					pcall(function() track:AdjustSpeed(target) end)
+				end
+			end
+		end
+	end
+end
+
 local function restoreSmartEntry(entry)
 	local inst = entry.Inst
 	local orig = entry.Orig
-	if not orig or not inst or not inst.Parent then
+	if not inst or not inst.Parent then
 		SmartPerf.Modified[inst] = nil
 		entry.Tier = 0
 		return
 	end
-	if entry.Kind == "Mesh" or entry.Kind == "Part" then
-		pcall(function()
-			if orig.Reflectance ~= nil and inst.Reflectance ~= orig.Reflectance then
-				inst.Reflectance = orig.Reflectance
-			end
-			if orig.Material ~= nil and inst.Material ~= orig.Material then
-				inst.Material = orig.Material
+	if entry.Kind == "Character" then
+		local meta = SmartPerf.CharacterModels[inst]
+		if meta then restoreAnimatorTracks(meta) end
+		SmartPerf.Modified[inst] = nil
+		entry.Tier = 0
+		return
+	end
+	if not orig then
+		SmartPerf.Modified[inst] = nil
+		entry.Tier = 0
+		return
+	end
+
+	pcall(function()
+		if entry.Kind == "Mesh" or entry.Kind == "Part" then
+			if orig.Reflectance ~= nil and inst.Reflectance ~= orig.Reflectance then inst.Reflectance = orig.Reflectance end
+			if orig.Material ~= nil and inst.Material ~= orig.Material then inst.Material = orig.Material end
+			if orig.CastShadow ~= nil and inst.CastShadow ~= orig.CastShadow then inst.CastShadow = orig.CastShadow end
+			if orig.LocalTransparencyModifier ~= nil and inst.LocalTransparencyModifier ~= orig.LocalTransparencyModifier then
+				inst.LocalTransparencyModifier = orig.LocalTransparencyModifier
 			end
 			if orig.RenderFidelity ~= nil and inst.RenderFidelity ~= orig.RenderFidelity then
 				inst.RenderFidelity = orig.RenderFidelity
 			end
-		end)
-	elseif entry.Kind == "Model" then
-		if orig.LevelOfDetail ~= nil then
-			pcall(function()
-				if inst.LevelOfDetail ~= orig.LevelOfDetail then
-					inst.LevelOfDetail = orig.LevelOfDetail
-				end
-			end)
+		elseif entry.Kind == "Model" then
+			if orig.LevelOfDetail ~= nil and inst.LevelOfDetail ~= orig.LevelOfDetail then
+				inst.LevelOfDetail = orig.LevelOfDetail
+			end
+		elseif entry.Kind == "SurfaceGui" then
+			if orig.Enabled ~= nil and inst.Enabled ~= orig.Enabled then inst.Enabled = orig.Enabled end
+			if orig.PixelsPerStud ~= nil and inst.PixelsPerStud ~= orig.PixelsPerStud then inst.PixelsPerStud = orig.PixelsPerStud end
+		elseif entry.Kind == "BillboardGui" then
+			if orig.Enabled ~= nil and inst.Enabled ~= orig.Enabled then inst.Enabled = orig.Enabled end
+			if orig.AlwaysOnTop ~= nil and inst.AlwaysOnTop ~= orig.AlwaysOnTop then inst.AlwaysOnTop = orig.AlwaysOnTop end
+		elseif entry.Kind == "GuiImage" then
+			if orig.ImageTransparency ~= nil and inst.ImageTransparency ~= orig.ImageTransparency then
+				inst.ImageTransparency = orig.ImageTransparency
+			end
+		elseif entry.Kind == "Decal" then
+			if orig.Transparency ~= nil and inst.Transparency ~= orig.Transparency then inst.Transparency = orig.Transparency end
+		elseif entry.Kind == "Particle" then
+			if orig.Enabled ~= nil and inst.Enabled ~= orig.Enabled then inst.Enabled = orig.Enabled end
+			if orig.Rate ~= nil and inst.Rate ~= orig.Rate then inst.Rate = orig.Rate end
+			if orig.LightEmission ~= nil and inst.LightEmission ~= orig.LightEmission then
+				inst.LightEmission = orig.LightEmission
+			end
+		elseif entry.Kind == "Beam" then
+			if orig.Enabled ~= nil and inst.Enabled ~= orig.Enabled then inst.Enabled = orig.Enabled end
+			if orig.Segments ~= nil and inst.Segments ~= orig.Segments then inst.Segments = orig.Segments end
+			if orig.LightEmission ~= nil and inst.LightEmission ~= orig.LightEmission then
+				inst.LightEmission = orig.LightEmission
+			end
+		elseif entry.Kind == "Trail" then
+			if orig.Enabled ~= nil and inst.Enabled ~= orig.Enabled then inst.Enabled = orig.Enabled end
+			if orig.MaxLength ~= nil and inst.MaxLength ~= orig.MaxLength then inst.MaxLength = orig.MaxLength end
+			if orig.LightEmission ~= nil and inst.LightEmission ~= orig.LightEmission then
+				inst.LightEmission = orig.LightEmission
+			end
+		elseif entry.Kind == "TempFx" then
+			if orig.Enabled ~= nil and inst.Enabled ~= orig.Enabled then inst.Enabled = orig.Enabled end
+			if orig.Size ~= nil and inst.Size ~= orig.Size then inst.Size = orig.Size end
+			if orig.Heat ~= nil and inst.Heat ~= orig.Heat then inst.Heat = orig.Heat end
+			if orig.Opacity ~= nil and inst.Opacity ~= orig.Opacity then inst.Opacity = orig.Opacity end
+		elseif entry.Kind == "Explosion" then
+			if orig.Visible ~= nil and inst.Visible ~= orig.Visible then inst.Visible = orig.Visible end
+		elseif entry.Kind == "Light" then
+			if orig.Enabled ~= nil and inst.Enabled ~= orig.Enabled then inst.Enabled = orig.Enabled end
+			if orig.Brightness ~= nil and inst.Brightness ~= orig.Brightness then inst.Brightness = orig.Brightness end
+			if orig.Range ~= nil and inst.Range ~= orig.Range then inst.Range = orig.Range end
+			if orig.Shadows ~= nil and inst.Shadows ~= orig.Shadows then inst.Shadows = orig.Shadows end
 		end
-	elseif entry.Kind == "SurfaceGui" then
-		if orig.PixelsPerStud ~= nil then
-			pcall(function()
-				if inst.PixelsPerStud ~= orig.PixelsPerStud then
-					inst.PixelsPerStud = orig.PixelsPerStud
-				end
-			end)
-		end
-	end
+	end)
+
 	SmartPerf.Modified[inst] = nil
 	entry.Tier = 0
 end
 
-local function applySmartTier(entry, newTier)
+local function applySmartTier(entry, newTier, intensity)
+	-- Tiers:
+	--   0 = Near / Preserved
+	--   1 = Mid LOD
+	--   2 = Far Aggressive LOD
+	--   3 = Culled (Off-screen ou > CullRadius)
+	--   4 = Hibernated (efeito temporario finalizado)
 	if newTier == 0 then
 		if SmartPerf.Modified[entry.Inst] then
 			restoreSmartEntry(entry)
@@ -645,52 +1003,232 @@ local function applySmartTier(entry, newTier)
 	if not inst or not inst.Parent then return end
 	local orig = captureSmartOrig(entry)
 	local changed = false
+	local cfg = SmartPerf.Config
+	local kind = entry.Kind
+	local sev = math.clamp(intensity or 0.5, 0.1, 1)
 
-	if entry.Kind == "Mesh" or entry.Kind == "Part" then
-		local targetReflect = orig.Reflectance or 0
-		if targetReflect > 0.05 then
-			targetReflect = (newTier == 1) and (targetReflect * 0.3) or 0
+	if kind == "Character" then
+		local meta = SmartPerf.CharacterModels[inst]
+		if meta and cfg.CharacterOptimization and not meta.InCombat and newTier >= 2 then
+			applyAnimatorThrottle(meta, newTier >= 3 and 0.25 or 0.55)
+			changed = true
+		elseif meta then
+			restoreAnimatorTracks(meta)
 		end
-		if math.abs(inst.Reflectance - targetReflect) > 0.01 then
-			local ok = pcall(function() inst.Reflectance = targetReflect end)
-			if ok then changed = true end
-		end
-
-		local origMat = orig.Material
-		local targetMat = origMat
-		if origMat == Enum.Material.Glass then
-			targetMat = Enum.Material.SmoothPlastic
-		elseif newTier == 2 and origMat and SmartProceduralMaterials[origMat] then
-			targetMat = Enum.Material.SmoothPlastic
-		end
-		if targetMat and inst.Material ~= targetMat then
-			local ok = pcall(function() inst.Material = targetMat end)
-			if ok then changed = true end
+	elseif kind == "Mesh" or kind == "Part" then
+		-- Somente oculta via LocalTransparencyModifier se Tier >= 3 (Culled) e seguro
+		local canCullPart = newTier >= 3 and cfg.FrustumCulling and not entry.CombatProtected
+			and (entry.IsAccessory or entry.Radius < 45)
+		local targetLocalTransp = canCullPart and 1 or (orig.LocalTransparencyModifier or 0)
+		if orig.LocalTransparencyModifier ~= nil and math.abs(inst.LocalTransparencyModifier - targetLocalTransp) > 0.01 then
+			if pcall(function() inst.LocalTransparencyModifier = targetLocalTransp end) then changed = true end
 		end
 
-		if entry.Kind == "Mesh" and orig.RenderFidelity ~= nil then
-			local targetRf = (newTier == 2) and Enum.RenderFidelity.Performance or Enum.RenderFidelity.Automatic
-			if inst.RenderFidelity ~= targetRf then
-				local ok = pcall(function() inst.RenderFidelity = targetRf end)
-				if ok then changed = true end
+		if orig.CastShadow ~= nil then
+			local targetShadow = (newTier >= 1 and (entry.IsAccessory or newTier >= 2 or sev >= 0.45))
+				and false or orig.CastShadow
+			if inst.CastShadow ~= targetShadow then
+				if pcall(function() inst.CastShadow = targetShadow end) then changed = true end
 			end
 		end
-	elseif entry.Kind == "Model" and orig.LevelOfDetail ~= nil then
+
+		local targetReflect = orig.Reflectance or 0
+		if targetReflect > 0.05 then
+			targetReflect = (newTier == 1) and (targetReflect * 0.35) or 0
+		end
+		if math.abs(inst.Reflectance - targetReflect) > 0.01 then
+			if pcall(function() inst.Reflectance = targetReflect end) then changed = true end
+		end
+
+		if not entry.HasTex then
+			local origMat = orig.Material
+			local targetMat = origMat
+			if origMat == Enum.Material.Glass then
+				targetMat = Enum.Material.SmoothPlastic
+			elseif newTier >= 2 and origMat and SmartProceduralMaterials[origMat] then
+				targetMat = Enum.Material.SmoothPlastic
+			end
+			if targetMat and inst.Material ~= targetMat then
+				if pcall(function() inst.Material = targetMat end) then changed = true end
+			end
+		end
+
+		if kind == "Mesh" and orig.RenderFidelity ~= nil then
+			local targetRf = (newTier >= 2) and Enum.RenderFidelity.Performance or Enum.RenderFidelity.Automatic
+			if inst.RenderFidelity ~= targetRf then
+				if pcall(function() inst.RenderFidelity = targetRf end) then changed = true end
+			end
+		end
+	elseif kind == "Model" and orig.LevelOfDetail ~= nil then
 		local targetLod = Enum.ModelLevelOfDetail.Automatic
-		if newTier == 2 then
+		if newTier >= 2 then
 			local okSm, sm = pcall(function() return Enum.ModelLevelOfDetail.StreamingMesh end)
 			if okSm and sm then targetLod = sm end
 		end
 		if inst.LevelOfDetail ~= targetLod then
-			local ok = pcall(function() inst.LevelOfDetail = targetLod end)
-			if ok then changed = true end
+			if pcall(function() inst.LevelOfDetail = targetLod end) then changed = true end
 		end
-	elseif entry.Kind == "SurfaceGui" and orig.PixelsPerStud ~= nil then
-		local cap = (newTier == 2) and 10 or 18
-		local targetPps = math.min(orig.PixelsPerStud, cap)
-		if math.abs(inst.PixelsPerStud - targetPps) > 0.5 then
-			local ok = pcall(function() inst.PixelsPerStud = targetPps end)
-			if ok then changed = true end
+	elseif kind == "Decal" then
+		local hideDecal = (newTier >= 3) or (newTier >= 2 and sev >= 0.65 and not entry.CombatProtected)
+		local targetT = hideDecal and 1 or orig.Transparency
+		if math.abs(inst.Transparency - targetT) > 0.01 then
+			if pcall(function() inst.Transparency = targetT end) then changed = true end
+		end
+	elseif kind == "GuiImage" then
+		local hideImg = newTier >= 3 and not entry.CombatProtected
+		local targetT = hideImg and 1 or orig.ImageTransparency
+		if math.abs(inst.ImageTransparency - targetT) > 0.01 then
+			if pcall(function() inst.ImageTransparency = targetT end) then changed = true end
+		end
+	elseif kind == "SurfaceGui" or kind == "BillboardGui" then
+		if newTier >= 3 and not entry.CombatProtected then
+			if inst.Enabled ~= false then
+				if pcall(function() inst.Enabled = false end) then changed = true end
+			end
+		else
+			if orig.Enabled ~= nil and inst.Enabled ~= orig.Enabled then
+				if pcall(function() inst.Enabled = orig.Enabled end) then changed = true end
+			end
+			if kind == "SurfaceGui" and orig.PixelsPerStud ~= nil then
+				local cap = (newTier >= 2) and 10 or 18
+				local targetPps = math.min(orig.PixelsPerStud, cap)
+				if math.abs(inst.PixelsPerStud - targetPps) > 0.5 then
+					if pcall(function() inst.PixelsPerStud = targetPps end) then changed = true end
+				end
+			end
+		end
+	elseif kind == "Particle" then
+		if (newTier == 4 or (newTier == 3 and not entry.CombatProtected)) and orig.Enabled then
+			if inst.Enabled ~= false then
+				if pcall(function() inst.Enabled = false end) then changed = true end
+			end
+		else
+			if orig.Enabled ~= nil and inst.Enabled ~= orig.Enabled then
+				if pcall(function() inst.Enabled = orig.Enabled end) then changed = true end
+			end
+			if cfg.EffectOptimization and orig.Rate and orig.Rate > 0 then
+				local minKeep = entry.CombatProtected and 0.72 or 0.18
+				local factor = (newTier == 1) and math.max(minKeep, 1 - sev * 0.45)
+					or math.max(minKeep, 1 - sev * 0.78)
+				local targetRate = math.max(1, math.floor(orig.Rate * factor + 0.5))
+				if math.abs(inst.Rate - targetRate) > 0.5 then
+					if pcall(function() inst.Rate = targetRate end) then changed = true end
+				end
+				if orig.LightEmission ~= nil and not entry.CombatProtected then
+					local targetLe = orig.LightEmission * ((newTier >= 2) and 0.45 or 0.75)
+					if math.abs(inst.LightEmission - targetLe) > 0.02 then
+						pcall(function() inst.LightEmission = targetLe end)
+					end
+				end
+			elseif not cfg.EffectOptimization then
+				if orig.Rate ~= nil and math.abs(inst.Rate - orig.Rate) > 0.5 then
+					pcall(function() inst.Rate = orig.Rate end)
+				end
+				if orig.LightEmission ~= nil and math.abs(inst.LightEmission - orig.LightEmission) > 0.02 then
+					pcall(function() inst.LightEmission = orig.LightEmission end)
+				end
+			end
+		end
+	elseif kind == "Beam" or kind == "Trail" then
+		if (newTier == 4 or (newTier == 3 and not entry.CombatProtected)) and orig.Enabled then
+			if inst.Enabled ~= false then
+				if pcall(function() inst.Enabled = false end) then changed = true end
+			end
+		else
+			if orig.Enabled ~= nil and inst.Enabled ~= orig.Enabled then
+				if pcall(function() inst.Enabled = orig.Enabled end) then changed = true end
+			end
+			if cfg.EffectOptimization then
+				local factor = (newTier >= 2) and (1 - sev * 0.6) or (1 - sev * 0.3)
+				if kind == "Beam" and orig.Segments ~= nil then
+					local targetSeg = math.max(1, math.floor(orig.Segments * factor + 0.5))
+					if inst.Segments ~= targetSeg then
+						if pcall(function() inst.Segments = targetSeg end) then changed = true end
+					end
+				elseif kind == "Trail" and orig.MaxLength ~= nil then
+					local targetLen = math.max(1, orig.MaxLength * math.max(0.35, factor))
+					if math.abs(inst.MaxLength - targetLen) > 0.25 then
+						if pcall(function() inst.MaxLength = targetLen end) then changed = true end
+					end
+				end
+			else
+				if kind == "Beam" and orig.Segments ~= nil and inst.Segments ~= orig.Segments then
+					pcall(function() inst.Segments = orig.Segments end)
+				elseif kind == "Trail" and orig.MaxLength ~= nil and math.abs(inst.MaxLength - orig.MaxLength) > 0.25 then
+					pcall(function() inst.MaxLength = orig.MaxLength end)
+				end
+			end
+		end
+	elseif kind == "TempFx" then
+		if newTier >= 3 then
+			if inst.Enabled ~= false then
+				if pcall(function() inst.Enabled = false end) then changed = true end
+			end
+		else
+			if orig.Enabled ~= nil and inst.Enabled ~= orig.Enabled then
+				if pcall(function() inst.Enabled = orig.Enabled end) then changed = true end
+			end
+			if cfg.EffectOptimization then
+				local factor = (newTier >= 2) and 0.45 or 0.75
+				if orig.Opacity ~= nil then
+					local tOp = orig.Opacity * factor
+					if math.abs(inst.Opacity - tOp) > 0.03 then
+						if pcall(function() inst.Opacity = tOp end) then changed = true end
+					end
+				end
+				if orig.Size ~= nil then
+					local tSz = math.max(1, orig.Size * factor)
+					if math.abs(inst.Size - tSz) > 0.2 then
+						if pcall(function() inst.Size = tSz end) then changed = true end
+					end
+				end
+			else
+				if orig.Opacity ~= nil and math.abs(inst.Opacity - orig.Opacity) > 0.03 then
+					pcall(function() inst.Opacity = orig.Opacity end)
+				end
+				if orig.Size ~= nil and math.abs(inst.Size - orig.Size) > 0.2 then
+					pcall(function() inst.Size = orig.Size end)
+				end
+			end
+		end
+	elseif kind == "Explosion" then
+		if newTier == 4 and orig.Visible then
+			if inst.Visible ~= false then
+				if pcall(function() inst.Visible = false end) then changed = true end
+			end
+		end
+	elseif kind == "Light" then
+		if newTier >= 3 and not entry.CombatProtected then
+			if inst.Enabled ~= false then
+				if pcall(function() inst.Enabled = false end) then changed = true end
+			end
+		else
+			if orig.Enabled ~= nil and inst.Enabled ~= orig.Enabled then
+				if pcall(function() inst.Enabled = orig.Enabled end) then changed = true end
+			end
+			if orig.Shadows ~= nil and inst.Shadows ~= false and not entry.CombatProtected then
+				if pcall(function() inst.Shadows = false end) then changed = true end
+			end
+			if cfg.EffectOptimization and orig.Range ~= nil then
+				local scale = (newTier >= 2) and math.max(0.55, 1 - sev * 0.4) or math.max(0.75, 1 - sev * 0.2)
+				local targetRange = orig.Range * scale
+				if math.abs(inst.Range - targetRange) > 0.5 then
+					if pcall(function() inst.Range = targetRange end) then changed = true end
+				end
+				if orig.Brightness ~= nil and newTier >= 2 and not entry.CombatProtected then
+					local targetBr = orig.Brightness * math.max(0.5, 1 - sev * 0.4)
+					if math.abs(inst.Brightness - targetBr) > 0.05 then
+						if pcall(function() inst.Brightness = targetBr end) then changed = true end
+					end
+				end
+			elseif not cfg.EffectOptimization then
+				if orig.Range ~= nil and math.abs(inst.Range - orig.Range) > 0.5 then
+					pcall(function() inst.Range = orig.Range end)
+				end
+				if orig.Brightness ~= nil and math.abs(inst.Brightness - orig.Brightness) > 0.05 then
+					pcall(function() inst.Brightness = orig.Brightness end)
+				end
+			end
 		end
 	end
 
@@ -709,6 +1247,10 @@ local function refreshSmartCacheEntry(inst)
 end
 
 local function removeSmartEntry(inst)
+	if SmartPerf.CharacterModels[inst] then
+		restoreAnimatorTracks(SmartPerf.CharacterModels[inst])
+		SmartPerf.CharacterModels[inst] = nil
+	end
 	local entry = SmartPerf.EntryMap[inst]
 	if not entry then return end
 	SmartPerf.EntryMap[inst] = nil
@@ -716,7 +1258,7 @@ local function removeSmartEntry(inst)
 	entry.Dead = true
 end
 
-local function getReferencePoints()
+local function getReferenceContext()
 	local player = Players.LocalPlayer
 	local playerPos = nil
 	local char = player and player.Character
@@ -728,27 +1270,271 @@ local function getReferencePoints()
 	end
 	local cam = workspace.CurrentCamera
 	local camPos = cam and cam.CFrame.Position or nil
-	return playerPos, camPos
+	local camLook = cam and cam.CFrame.LookVector or nil
+	local viewSize = cam and cam.ViewportSize or Vector2.new(1280, 720)
+	return playerPos, cam, camPos, camLook, viewSize
+end
+
+local function refreshCombatContext(now, playerPos)
+	local cfg = SmartPerf.Config
+	if not cfg.CombatProtection then
+		SmartPerf.LocalCombatUntil = 0
+		for _, meta in pairs(SmartPerf.CharacterModels) do
+			meta.InCombat = false
+		end
+		return
+	end
+
+	local localChar = Players.LocalPlayer and Players.LocalPlayer.Character
+	if localChar and localChar.Parent then
+		if localChar:FindFirstChildOfClass("Tool") then
+			SmartPerf.LocalCombatUntil = math.max(SmartPerf.LocalCombatUntil, now + 4.5)
+		end
+		local hum = localChar:FindFirstChildOfClass("Humanoid")
+		if hum then
+			if SmartPerf.LastLocalHp and hum.Health < SmartPerf.LastLocalHp - 0.5 then
+				SmartPerf.LocalCombatUntil = math.max(SmartPerf.LocalCombatUntil, now + 6.0)
+			end
+			SmartPerf.LastLocalHp = hum.Health
+		end
+		local root = localChar:FindFirstChild("HumanoidRootPart")
+		if root and root:IsA("BasePart") and root.AssemblyLinearVelocity.Magnitude > 26 then
+			SmartPerf.LocalCombatUntil = math.max(SmartPerf.LocalCombatUntil, now + 2.5)
+		end
+	end
+
+	local localInCombat = now < SmartPerf.LocalCombatUntil
+	for model, meta in pairs(SmartPerf.CharacterModels) do
+		if not model or not model.Parent then
+			SmartPerf.CharacterModels[model] = nil
+		else
+			if model:FindFirstChildOfClass("Tool") then
+				meta.CombatUntil = math.max(meta.CombatUntil, now + 4.5)
+			end
+			if meta.Humanoid and meta.Humanoid.Parent then
+				local hp = meta.Humanoid.Health
+				if meta.LastHp and hp < meta.LastHp - 0.5 then
+					meta.CombatUntil = math.max(meta.CombatUntil, now + 5.5)
+				end
+				meta.LastHp = hp
+			end
+			if localInCombat and playerPos then
+				local pos = getPartPositionSafe(model)
+				if pos and (pos - playerPos).Magnitude <= 125 then
+					meta.CombatUntil = math.max(meta.CombatUntil, now + 3.5)
+				end
+			end
+			meta.InCombat = now < meta.CombatUntil
+		end
+	end
+end
+
+local function isEntryInCombat(entry)
+	if not SmartPerf.Config.CombatProtection then return false end
+	if entry.CombatProtected then return true end
+	if entry.CharModel then
+		local meta = SmartPerf.CharacterModels[entry.CharModel]
+		if meta and meta.InCombat then return true end
+	end
+	if (entry.Kind == "Part" or entry.Kind == "Mesh") and entry.Inst and not entry.Inst.Anchored then
+		local okVel, vel = pcall(function() return entry.Inst.AssemblyLinearVelocity.Magnitude end)
+		if okVel and vel >= 14 then return true end
+	end
+	return false
+end
+
+local function computeEntryVisibility(entry, cam, camPos, rawCamDist, viewW, viewH)
+	if not cam or not camPos then return true end
+	if rawCamDist <= math.max(entry.Radius + 18, 24) then return true end
+	local okVp, vp = pcall(function() return cam:WorldToViewportPoint(entry.Pos) end)
+	if not okVp or typeof(vp) ~= "Vector3" then return true end
+	local marginPx = math.clamp((entry.Radius / math.max(rawCamDist, 1)) * viewH * 1.2 + 42, 42, viewH * 0.95)
+	if vp.Z < -entry.Radius then
+		return false
+	end
+	return vp.X >= -marginPx and vp.X <= (viewW + marginPx)
+		and vp.Y >= -marginPx and vp.Y <= (viewH + marginPx)
+end
+
+local function isFinishedTempEffect(entry, now)
+	if not SmartPerf.Config.EffectCleanup then return false end
+	if entry.Kind == "Explosion" then
+		return (now - (entry.CreatedAt or now)) >= 1.6
+	end
+	if entry.IsTemp and (entry.Kind == "Particle" or entry.Kind == "TempFx") then
+		local inst = entry.Inst
+		if inst and inst.Parent then
+			if inst.Enabled == false then
+				if not entry.DisabledSince then entry.DisabledSince = now end
+				if (now - entry.DisabledSince) >= 2.2 then return true end
+			else
+				entry.DisabledSince = nil
+			end
+		end
+	end
+	return false
+end
+
+local function evaluateSmartEntry(entry, now, playerPos, cam, camPos, viewW, viewH)
+	local anchor = entry.Anchor or entry.Inst
+	if entry.Kind == "Character" or entry.Kind == "Model" then
+		if entry.Kind == "Character" then
+			local p = getPartPositionSafe(entry.Inst)
+			if p then entry.Pos = p end
+		end
+	elseif anchor and anchor.Parent then
+		local p = getPartPositionSafe(anchor)
+		if p then entry.Pos = p end
+	end
+
+	local pos = entry.Pos
+	local dPlayer = playerPos and (pos - playerPos).Magnitude or math.huge
+	local dCam = camPos and (pos - camPos).Magnitude or math.huge
+	local rawDist = math.min(dPlayer, dCam)
+	local effDist = math.max(0, rawDist - entry.Radius)
+
+	local inCombat = isEntryInCombat(entry)
+	entry.InCombatNow = inCombat
+
+	-- Limpeza segura (hibernacao reversivel) de efeitos temporarios ja finalizados
+	if isFinishedTempEffect(entry, now) then
+		if entry.Tier ~= 4 then
+			applySmartTier(entry, 4, SmartPerf.Intensity)
+			entry.LastSwitch = now
+		end
+		return
+	end
+
+	-- Protecao absoluta de combate & objetos proximos do jogador
+	local nearR, farR, cullR = SmartPerf.NearRadius, SmartPerf.FarRadius, SmartPerf.CullRadius
+	if inCombat then
+		if effDist <= farR then
+			if entry.Tier ~= 0 then
+				applySmartTier(entry, 0, SmartPerf.Intensity)
+				entry.LastSwitch = now
+			end
+			return
+		end
+		-- Mesmo em combate distante, nunca oculta; aplica no maximo reducao leve
+		if entry.Tier ~= 1 then
+			applySmartTier(entry, 1, SmartPerf.Intensity * 0.45)
+			entry.LastSwitch = now
+		end
+		return
+	end
+
+	local inView = true
+	if SmartPerf.Config.FrustumCulling and effDist > nearR * 0.85 then
+		inView = computeEntryVisibility(entry, cam, camPos, dCam, viewW, viewH)
+	end
+
+	local curTier = entry.Tier or 0
+	local targetTier = curTier
+
+	-- Culling imediato quando fora da visao da camera (respeitando protecoes) or > CullRadius
+	if SmartPerf.Config.FrustumCulling and ((not inView and effDist > nearR) or effDist > cullR) then
+		if entry.Priority ~= "Critical" then
+			targetTier = 3
+		else
+			targetTier = 2
+		end
+	else
+		-- Se voltou para a visao da camera e estava culled (Tier 3), reavalia pela distancia imediatamente!
+		local evalTier = (curTier >= 3) and 2 or curTier
+		if evalTier == 0 then
+			if effDist > farR + SMART_HYSTERESIS then
+				targetTier = 2
+			elseif effDist > nearR + SMART_HYSTERESIS then
+				targetTier = 1
+			else
+				targetTier = 0
+			end
+		elseif evalTier == 1 then
+			if effDist < nearR - SMART_HYSTERESIS then
+				targetTier = 0
+			elseif effDist > farR + SMART_HYSTERESIS then
+				targetTier = 2
+			else
+				targetTier = 1
+			end
+		else
+			if effDist < nearR - SMART_HYSTERESIS then
+				targetTier = 0
+			elseif effDist < farR - SMART_HYSTERESIS then
+				targetTier = 1
+			else
+				targetTier = 2
+			end
+		end
+	end
+
+	-- Restauracao quando volta a ficar visivel ou se aproxima e imediata (sem esperar dwell!)
+	local restoringVisual = targetTier < curTier
+	if targetTier ~= curTier and (restoringVisual or (now - (entry.LastSwitch or 0) >= SMART_MIN_DWELL)) then
+		applySmartTier(entry, targetTier, SmartPerf.Intensity)
+		entry.LastSwitch = now
+	end
+end
+
+local function updateAdaptiveIntensity(dt, now)
+	if dt > 0 and dt < 0.5 then
+		local instFps = 1 / math.max(dt, 0.001)
+		SmartPerf.SmoothFps = SmartPerf.SmoothFps * 0.9 + instFps * 0.1
+		local isSpike = dt > 0.034 and 1 or 0
+		SmartPerf.SpikeScore = SmartPerf.SpikeScore * 0.92 + isSpike * 0.08
+	end
+
+	local cfg = SmartPerf.Config
+	local targetFps = math.clamp(tonumber(cfg.TargetFPS) or 55, 30, 120)
+	local rawStress = math.clamp((targetFps - SmartPerf.SmoothFps) / math.max(targetFps * 0.5, 16), 0, 1)
+	rawStress = math.clamp(rawStress + SmartPerf.SpikeScore * 0.45, 0, 1)
+
+	if rawStress > 0.22 or SmartPerf.SpikeScore > 0.12 then
+		SmartPerf.LastOverloadAt = now
+	end
+
+	local mode = cfg.Mode or "Automatico"
+	local desired = rawStress
+	if mode == "Leve" then
+		desired = math.clamp(0.18 + rawStress * 0.27, 0.15, 0.45)
+	elseif mode == "Equilibrado" then
+		desired = math.clamp(0.40 + rawStress * 0.35, 0.35, 0.75)
+	elseif mode == "Agressivo" then
+		desired = math.clamp(0.68 + rawStress * 0.25, 0.65, 0.93)
+	elseif mode == "Ultra" then
+		desired = math.clamp(0.88 + rawStress * 0.12, 0.85, 1.0)
+	else
+		desired = math.clamp(0.15 + rawStress * 0.85, 0.15, 1.0)
+	end
+
+	-- Escalonamento assimetrico: sobe rapido na queda de FPS, recupera devagar apos estabilizar
+	if desired > SmartPerf.Intensity then
+		SmartPerf.Intensity = SmartPerf.Intensity * 0.78 + desired * 0.22
+	elseif (now - SmartPerf.LastOverloadAt) >= 2.0 and SmartPerf.SmoothFps >= (targetFps - 3) then
+		SmartPerf.Intensity = SmartPerf.Intensity * 0.94 + desired * 0.06
+	end
+
+	SmartPerf.Stress = SmartPerf.Intensity
+	local inten = SmartPerf.Intensity
+	SmartPerf.NearRadius = math.floor(145 - inten * 68 + 0.5)
+	SmartPerf.FarRadius = math.floor(310 - inten * 130 + 0.5)
+	SmartPerf.CullRadius = math.floor(520 - inten * 230 + 0.5)
+
+	SmartPerf.Stats.Mode = mode
+	SmartPerf.Stats.IntensityPct = math.floor(inten * 100 + 0.5)
+	SmartPerf.Stats.NearRadius = SmartPerf.NearRadius
+	SmartPerf.Stats.FarRadius = SmartPerf.FarRadius
+	SmartPerf.Stats.CullRadius = SmartPerf.CullRadius
+	SmartPerf.Stats.Profile = inten >= 0.78 and "Ultra"
+		or (inten >= 0.55 and "Agressivo" or (inten >= 0.30 and "Equilibrado" or "Leve"))
 end
 
 local function stepSmartPerformance(dt)
 	if not SmartPerf.Enabled then return end
+	local now = os.clock()
+	local startClock = now
 
-	if dt > 0 and dt < 0.5 then
-		local instFps = 1 / math.max(dt, 0.001)
-		SmartPerf.SmoothFps = SmartPerf.SmoothFps * 0.9 + instFps * 0.1
-	end
-
-	local rawStress = math.clamp((54 - SmartPerf.SmoothFps) / 26, 0, 1)
-	SmartPerf.Stress = SmartPerf.Stress * 0.85 + rawStress * 0.15
-	SmartPerf.NearRadius = math.floor(135 - SmartPerf.Stress * 48 + 0.5)
-	SmartPerf.FarRadius = math.floor(295 - SmartPerf.Stress * 95 + 0.5)
-	SmartPerf.Stats.NearRadius = SmartPerf.NearRadius
-	SmartPerf.Stats.FarRadius = SmartPerf.FarRadius
-	SmartPerf.Stats.Profile = SmartPerf.Stress >= 0.65 and "Agressivo"
-		or (SmartPerf.Stress >= 0.25 and "Equilibrado" or "Leve")
-
-	local startClock = os.clock()
+	updateAdaptiveIntensity(dt, now)
 
 	-- Indexacao inicial incremental em lotes pequenos para nao gerar stutter
 	if not SmartPerf.ScanDone and SmartPerf.ScanQueue then
@@ -771,22 +1557,61 @@ local function stepSmartPerformance(dt)
 		end
 	end
 
-	SmartPerf.StepAccum = SmartPerf.StepAccum + dt
-	local playerPos, camPos = getReferencePoints()
+	local playerPos, cam, camPos, camLook, viewSize = getReferenceContext()
+	if not playerPos and not camPos then return end
+	local viewW, viewH = math.max(viewSize.X, 1), math.max(viewSize.Y, 1)
+
+	SmartPerf.ContextAccum = SmartPerf.ContextAccum + dt
+	if SmartPerf.ContextAccum >= 0.2 then
+		SmartPerf.ContextAccum = 0
+		refreshCombatContext(now, playerPos)
+	end
+
 	local moved = false
-	if playerPos and (not SmartPerf.LastPlayerPos or (playerPos - SmartPerf.LastPlayerPos).Magnitude >= 4) then
-		moved = true
-		SmartPerf.LastPlayerPos = playerPos
+	if playerPos and (not SmartPerf.LastPlayerPos or (playerPos - SmartPerf.LastPlayerPos).Magnitude >= 3) then
+		moved = true; SmartPerf.LastPlayerPos = playerPos
 	end
-	if camPos and (not SmartPerf.LastCamPos or (camPos - SmartPerf.LastCamPos).Magnitude >= 4) then
-		moved = true
-		SmartPerf.LastCamPos = camPos
+	if camPos and (not SmartPerf.LastCamPos or (camPos - SmartPerf.LastCamPos).Magnitude >= 3) then
+		moved = true; SmartPerf.LastCamPos = camPos
 	end
-	local interval = (moved or SmartPerf.Stress >= 0.3) and 0.14 or 0.28
+	if camLook and (not SmartPerf.LastCamLook or camLook:Dot(SmartPerf.LastCamLook) < 0.985) then
+		moved = true; SmartPerf.LastCamLook = camLook
+	end
+
+	-- Passo rapido de restauracao visual para objetos culled/modificados ao virar a camera
+	SmartPerf.RestoreAccum = SmartPerf.RestoreAccum + dt
+	if SmartPerf.RestoreAccum >= (moved and 0.08 or 0.16) then
+		SmartPerf.RestoreAccum = 0
+		local rList = SmartPerf.RestoreList
+		table.clear(rList)
+		for _, entry in pairs(SmartPerf.Modified) do
+			if not entry.Dead and entry.Inst and entry.Inst.Parent then
+				table.insert(rList, entry)
+			end
+		end
+		local rCount = #rList
+		if rCount > 0 then
+			local rCursor = SmartPerf.RestoreCursor
+			if rCursor > rCount then rCursor = 1 end
+			local rBatch = math.min(rCount, 120)
+			for _ = 1, rBatch do
+				if rCursor > rCount then rCursor = 1 end
+				local entry = rList[rCursor]
+				if entry and not entry.Dead and entry.Inst and entry.Inst.Parent then
+					evaluateSmartEntry(entry, now, playerPos, cam, camPos, viewW, viewH)
+				end
+				rCursor = rCursor + 1
+				if (os.clock() - startClock) > SMART_RESTORE_BUDGET then break end
+			end
+			SmartPerf.RestoreCursor = rCursor
+		end
+	end
+
+	SmartPerf.StepAccum = SmartPerf.StepAccum + dt
+	local interval = (moved or SmartPerf.Intensity >= 0.35) and 0.14 or 0.26
 	if SmartPerf.StepAccum < interval then return end
 	SmartPerf.StepAccum = 0
 
-	if not playerPos and not camPos then return end
 	local cache = SmartPerf.Cache
 	local count = #cache
 	if count == 0 then
@@ -794,13 +1619,14 @@ local function stepSmartPerformance(dt)
 		SmartPerf.Stats.NearCount = 0
 		SmartPerf.Stats.MidCount = 0
 		SmartPerf.Stats.FarCount = 0
+		SmartPerf.Stats.CulledCount = 0
+		SmartPerf.Stats.ProtectedCount = 0
+		SmartPerf.Stats.CleanedCount = 0
 		SmartPerf.Stats.OptimizedCount = 0
 		return
 	end
 
-	local now = os.clock()
-	local nearR, farR = SmartPerf.NearRadius, SmartPerf.FarRadius
-	local batchLimit = math.min(count, 180)
+	local batchLimit = math.min(count, 200)
 	local cursor = SmartPerf.Cursor
 	if cursor > count then cursor = 1 end
 
@@ -816,45 +1642,7 @@ local function stepSmartPerformance(dt)
 			cache[cursor] = cache[#cache]
 			table.remove(cache)
 		else
-			if entry.Kind == "SurfaceGui" then
-				local p = entry.AnchorPart
-				if p and p.Parent then entry.Pos = p.Position end
-			elseif entry.Kind == "Part" or entry.Kind == "Mesh" then
-				entry.Pos = entry.Inst.Position
-			end
-
-			local pos = entry.Pos
-			local d1 = playerPos and (pos - playerPos).Magnitude or math.huge
-			local d2 = camPos and (pos - camPos).Magnitude or math.huge
-			local rawDist = math.min(d1, d2)
-			local effDist = math.max(0, rawDist - entry.Radius)
-
-			local curTier = entry.Tier or 0
-			local targetTier = curTier
-			if curTier == 0 then
-				if effDist > farR + SMART_HYSTERESIS then
-					targetTier = 2
-				elseif effDist > nearR + SMART_HYSTERESIS then
-					targetTier = 1
-				end
-			elseif curTier == 1 then
-				if effDist < nearR - SMART_HYSTERESIS then
-					targetTier = 0
-				elseif effDist > farR + SMART_HYSTERESIS then
-					targetTier = 2
-				end
-			else
-				if effDist < nearR - SMART_HYSTERESIS then
-					targetTier = 0
-				elseif effDist < farR - SMART_HYSTERESIS then
-					targetTier = 1
-				end
-			end
-
-			if targetTier ~= curTier and (now - (entry.LastSwitch or 0) >= SMART_MIN_DWELL or targetTier == 0) then
-				applySmartTier(entry, targetTier)
-				entry.LastSwitch = now
-			end
+			evaluateSmartEntry(entry, now, playerPos, cam, camPos, viewW, viewH)
 			cursor = cursor + 1
 		end
 		checks = checks + 1
@@ -864,20 +1652,27 @@ local function stepSmartPerformance(dt)
 	end
 	SmartPerf.Cursor = cursor
 
-	-- Contadores rapidos sem iteracao completa pesada (amostra ou contagem direta leve)
-	local nearC, midC, farC, optC = 0, 0, 0, 0
+	local nearC, midC, farC, cullC, protC, cleanC, optC = 0, 0, 0, 0, 0, 0, 0
 	for _, entry in ipairs(cache) do
 		if not entry.Dead then
-			if entry.Tier == 0 then nearC = nearC + 1
-			elseif entry.Tier == 1 then midC = midC + 1
-			else farC = farC + 1 end
+			if entry.InCombatNow or entry.CombatProtected then protC = protC + 1 end
+			local t = entry.Tier or 0
+			if t == 0 then nearC = nearC + 1
+			elseif t == 1 then midC = midC + 1
+			elseif t == 2 then farC = farC + 1
+			elseif t == 3 then cullC = cullC + 1
+			else cleanC = cleanC + 1 end
 		end
 	end
 	for _ in pairs(SmartPerf.Modified) do optC = optC + 1 end
+
 	SmartPerf.Stats.CachedCount = #cache
 	SmartPerf.Stats.NearCount = nearC
 	SmartPerf.Stats.MidCount = midC
 	SmartPerf.Stats.FarCount = farC
+	SmartPerf.Stats.CulledCount = cullC
+	SmartPerf.Stats.ProtectedCount = protC
+	SmartPerf.Stats.CleanedCount = cleanC
 	SmartPerf.Stats.OptimizedCount = optC
 end
 
@@ -885,10 +1680,12 @@ local function enableSmartPerf()
 	if SmartPerf.Enabled then return end
 	SmartPerf.Enabled = true
 	SmartPerf.Stats.Enabled = true
-	SmartPerf.Stats.Profile = "Equilibrado"
 	SmartPerf.StepAccum = 0.3
+	SmartPerf.RestoreAccum = 0.2
+	SmartPerf.ContextAccum = 0.2
 	SmartPerf.LastPlayerPos = nil
 	SmartPerf.LastCamPos = nil
+	SmartPerf.LastCamLook = nil
 	local okDesc, desc = pcall(function() return workspace:GetDescendants() end)
 	if okDesc and typeof(desc) == "table" then
 		SmartPerf.ScanQueue = desc
@@ -903,10 +1700,15 @@ local function enableSmartPerf()
 		local parent = inst.Parent
 		if parent and SmartPerf.EntryMap[parent] then
 			if inst:IsA("ProximityPrompt") or inst:IsA("ClickDetector") or inst:IsA("DragDetector")
-				or inst:IsA("TouchTransmitter") or inst:IsA("SurfaceAppearance") or inst:IsA("Texture")
-				or inst:IsA("Decal") or inst:IsA("Humanoid") or inst:IsA("AnimationController") then
+				or inst:IsA("TouchTransmitter") or inst:IsA("Humanoid") or inst:IsA("AnimationController") then
 				restoreSmartEntry(SmartPerf.EntryMap[parent])
 				removeSmartEntry(parent)
+			elseif inst:IsA("SurfaceAppearance") or inst:IsA("Texture") or inst:IsA("Decal") then
+				local pEntry = SmartPerf.EntryMap[parent]
+				pEntry.HasTex = true
+				if pEntry.Orig and pEntry.Orig.Material and pEntry.Inst.Material ~= pEntry.Orig.Material then
+					pcall(function() pEntry.Inst.Material = pEntry.Orig.Material end)
+				end
 			end
 		end
 		refreshSmartCacheEntry(inst)
@@ -936,18 +1738,28 @@ local function disableSmartPerf()
 	for _, entry in ipairs(toRestore) do
 		restoreSmartEntry(entry)
 	end
+	for _, meta in pairs(SmartPerf.CharacterModels) do
+		restoreAnimatorTracks(meta)
+	end
 	table.clear(SmartPerf.Cache)
 	table.clear(SmartPerf.EntryMap)
 	table.clear(SmartPerf.Modified)
+	table.clear(SmartPerf.CharacterModels)
+	table.clear(SmartPerf.RestoreList)
 	SmartPerf.ScanQueue = nil
 	SmartPerf.ScanIndex = 1
 	SmartPerf.ScanDone = true
 	SmartPerf.Cursor = 1
+	SmartPerf.RestoreCursor = 1
 	SmartPerf.Stats.Enabled = false
 	SmartPerf.Stats.Profile = "Inativo"
+	SmartPerf.Stats.IntensityPct = 0
 	SmartPerf.Stats.NearCount = 0
 	SmartPerf.Stats.MidCount = 0
 	SmartPerf.Stats.FarCount = 0
+	SmartPerf.Stats.CulledCount = 0
+	SmartPerf.Stats.ProtectedCount = 0
+	SmartPerf.Stats.CleanedCount = 0
 	SmartPerf.Stats.OptimizedCount = 0
 	SmartPerf.Stats.CachedCount = 0
 end
@@ -4587,8 +5399,14 @@ function Window:_syncSettings()
 		controls.LowPerformance:Set(State.LowPerformance == true)
 		controls.SyncAccent()
 	end
-	if self._menuControls and self._menuControls.SmartPerf then
-		self._menuControls.SmartPerf:Set(SmartPerf.Enabled == true, true)
+	local menu = self._menuControls
+	if menu then
+		if menu.SmartPerf then menu.SmartPerf:Set(SmartPerf.Enabled == true, true) end
+		if menu.SmartMode then menu.SmartMode:Set(SmartPerf.Config.Mode, true) end
+		if menu.SmartCulling then menu.SmartCulling:Set(SmartPerf.Config.FrustumCulling == true, true) end
+		if menu.SmartCombat then menu.SmartCombat:Set(SmartPerf.Config.CombatProtection == true, true) end
+		if menu.SmartEffects then menu.SmartEffects:Set(SmartPerf.Config.EffectOptimization == true, true) end
+		if menu.SmartCleanup then menu.SmartCleanup:Set(SmartPerf.Config.EffectCleanup == true, true) end
 	end
 	self._syncing = false
 end
@@ -5557,9 +6375,51 @@ function Window:_buildMenu()
 		end,
 	})
 
+	local dropMode = tab:AddDropdown({
+		Name = "Modo Anti-Lag",
+		Options = { "Automatico", "Leve", "Equilibrado", "Agressivo", "Ultra" },
+		Default = SmartPerf.Config.Mode,
+		Callback = function(value)
+			if self._syncing then return end
+			AetherUI.SetSmartPerformanceConfig({ Mode = value })
+		end,
+	})
+
+	local toggleCulling = tab:AddToggle({
+		Name = "Culling por Visibilidade", Icon = "eye", Default = SmartPerf.Config.FrustumCulling == true,
+		Callback = function(value)
+			if self._syncing then return end
+			AetherUI.SetSmartPerformanceConfig({ FrustumCulling = value })
+		end,
+	})
+
+	local toggleCombat = tab:AddToggle({
+		Name = "Protecao de Combate", Icon = "shield", Default = SmartPerf.Config.CombatProtection == true,
+		Callback = function(value)
+			if self._syncing then return end
+			AetherUI.SetSmartPerformanceConfig({ CombatProtection = value })
+		end,
+	})
+
+	local toggleEffects = tab:AddToggle({
+		Name = "Otimizar Efeitos & Luzes", Icon = "flame", Default = SmartPerf.Config.EffectOptimization == true,
+		Callback = function(value)
+			if self._syncing then return end
+			AetherUI.SetSmartPerformanceConfig({ EffectOptimization = value })
+		end,
+	})
+
+	local toggleCleanup = tab:AddToggle({
+		Name = "Limpeza Segura de Efeitos", Icon = "trash", Default = SmartPerf.Config.EffectCleanup == true,
+		Callback = function(value)
+			if self._syncing then return end
+			AetherUI.SetSmartPerformanceConfig({ EffectCleanup = value })
+		end,
+	})
+
 	local smartCard = create("Frame", {
 		Name = "SmartPerfCard", LayoutOrder = tab:_nextOrder(),
-		Size = UDim2.new(1, 0, 0, m.Compact and 82 or 88),
+		Size = UDim2.new(1, 0, 0, m.Compact and 94 or 102),
 		BackgroundColor3 = Theme.Element, BackgroundTransparency = Glass.Element,
 		Parent = page,
 	})
@@ -5578,28 +6438,35 @@ function Window:_buildMenu()
 	local smartHeader = create("TextLabel", {
 		Name = "Header", BackgroundTransparency = 1,
 		Position = UDim2.fromOffset(26, 7), Size = UDim2.new(1, -38, 0, 18),
-		Text = "Anti-Lag por Distancia: Inativo", Font = Theme.FontBold, TextSize = m.Text - 1,
+		Text = "Anti-Lag Adaptativo: Inativo", Font = Theme.FontBold, TextSize = m.Text - 1,
 		TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd, Parent = smartCard,
 	})
 	local smartZones = create("TextLabel", {
 		Name = "Zones", BackgroundTransparency = 1,
 		Position = UDim2.fromOffset(12, 27), Size = UDim2.new(1, -24, 0, 16),
-		Text = "Perto: 0  •  Medio: 0  •  Longe: 0", Font = Theme.Font, TextSize = m.Text - 2,
+		Text = "Perto: 0  •  Medio: 0  •  Longe: 0  •  Ocultos: 0", Font = Theme.Font, TextSize = m.Text - 2,
 		TextColor3 = Theme.SubText, TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd, Parent = smartCard,
 	})
 	local smartDetail = create("TextLabel", {
 		Name = "Detail", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(12, 44), Size = UDim2.new(1, -24, 0, 16),
-		Text = "Otimizados: 0  •  Cache: 0  •  Raios: 130 / 290 st", Font = Theme.Font, TextSize = m.Text - 3,
+		Position = UDim2.fromOffset(12, 45), Size = UDim2.new(1, -24, 0, 16),
+		Text = "Otimizados: 0  •  Protegidos: 0  •  Limpos: 0", Font = Theme.Font, TextSize = m.Text - 3,
+		TextColor3 = Theme.Muted, TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd, Parent = smartCard,
+	})
+	local smartRadii = create("TextLabel", {
+		Name = "Radii", BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(12, 62), Size = UDim2.new(1, -24, 0, 15),
+		Text = "Raios: 130 / 290 / 460 st  •  Cache: 0  •  Restauracao 1:1", Font = Theme.Font, TextSize = math.max(9, m.Text - 4),
 		TextColor3 = Theme.Muted, TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd, Parent = smartCard,
 	})
 	create("TextLabel", {
 		Name = "Guarantee", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(12, 62), Size = UDim2.new(1, -24, 0, 16),
-		Text = "Preserva objetos proximos, personagens, luzes, efeitos, texturas e fisica.",
+		Position = UDim2.fromOffset(12, 79), Size = UDim2.new(1, -24, 0, 15),
+		Text = "Protege combate, habilidades, projeteis e restaura tudo ao voltar a visao.",
 		Font = Theme.Font, TextSize = math.max(9, m.Text - 4),
 		TextColor3 = Theme.Muted, TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd, Parent = smartCard,
@@ -5612,12 +6479,18 @@ function Window:_buildMenu()
 
 	self._menuControls = {
 		SmartPerf = toggleSmartPerf,
+		SmartMode = dropMode,
+		SmartCulling = toggleCulling,
+		SmartCombat = toggleCombat,
+		SmartEffects = toggleEffects,
+		SmartCleanup = toggleCleanup,
 		FpsVal = fpsVal, FpsSub = fpsSub,
 		PingVal = pingVal, PingSub = pingSub,
 		UptimeVal = uptimeVal, UptimeSub = uptimeSub,
 		GraphSummary = graphSummary, GraphBars = graphBars,
 		SmartDot = smartDot, SmartHeader = smartHeader,
 		SmartZones = smartZones, SmartDetail = smartDetail,
+		SmartRadii = smartRadii,
 		SmartStroke = smartStroke,
 	}
 	tab:_refresh()
@@ -5841,6 +6714,7 @@ function Window:ExportConfig(asTable)
 			Compact = self._compact == true,
 			LowPerformance = State.LowPerformance == true,
 			SmartPerformance = SmartPerf.Enabled == true,
+			SmartPerfConfig = AetherUI.GetSmartPerformanceConfig(),
 			Favorites = self:GetFavorites(),
 		},
 		Flags = {},
@@ -5880,6 +6754,7 @@ function Window:ImportConfig(dataOrJson, silent)
 		end
 		if typeof(meta.Compact) == "boolean" then self:SetCompact(meta.Compact) end
 		if typeof(meta.LowPerformance) == "boolean" then AetherUI.SetLowPerformance(meta.LowPerformance) end
+		if typeof(meta.SmartPerfConfig) == "table" then AetherUI.SetSmartPerformanceConfig(meta.SmartPerfConfig) end
 		if typeof(meta.SmartPerformance) == "boolean" then AetherUI.SetSmartPerformance(meta.SmartPerformance) end
 		if typeof(meta.Favorites) == "table" then self:SetFavorites(meta.Favorites) end
 	end
@@ -6047,15 +6922,21 @@ function Window:_updatePerfViews()
 		local sp = SmartPerf.Stats
 		if sp.Enabled then
 			menu.SmartDot.BackgroundColor3 = Theme.Success
-			menu.SmartHeader.Text = string.format("Anti-Lag Ativo  •  Perfil %s", sp.Profile)
-			menu.SmartZones.Text = string.format("Perto: %d  •  Medio: %d  •  Longe: %d", sp.NearCount, sp.MidCount, sp.FarCount)
-			menu.SmartDetail.Text = string.format("Otimizados: %d  •  Cache: %d  •  Raios: %d / %d st", sp.OptimizedCount, sp.CachedCount, sp.NearRadius, sp.FarRadius)
+			menu.SmartHeader.Text = string.format("Anti-Lag Ativo  •  %s (%s %d%%)", sp.Mode, sp.Profile, sp.IntensityPct)
+			menu.SmartZones.Text = string.format("Perto: %d  •  Medio: %d  •  Longe: %d  •  Ocultos: %d", sp.NearCount, sp.MidCount, sp.FarCount, sp.CulledCount)
+			menu.SmartDetail.Text = string.format("Otimizados: %d  •  Protegidos: %d  •  Limpos: %d", sp.OptimizedCount, sp.ProtectedCount, sp.CleanedCount)
+			if menu.SmartRadii then
+				menu.SmartRadii.Text = string.format("Raios: %d / %d / %d st  •  Cache: %d  •  Restauracao 1:1", sp.NearRadius, sp.FarRadius, sp.CullRadius, sp.CachedCount)
+			end
 			menu.SmartStroke.Color = accent()
 		else
 			menu.SmartDot.BackgroundColor3 = Theme.Muted
-			menu.SmartHeader.Text = "Anti-Lag por Distancia: Inativo"
-			menu.SmartZones.Text = "Preserva objetos proximos e aplica LOD apenas a distancia"
-			menu.SmartDetail.Text = "Otimizados: 0  •  Cache: 0  •  Zonas dinamicas"
+			menu.SmartHeader.Text = string.format("Anti-Lag Adaptativo: Inativo (%s)", sp.Mode or "Automatico")
+			menu.SmartZones.Text = "Culling por visao + LOD progressivo + protecao de combate"
+			menu.SmartDetail.Text = "Otimizados: 0  •  Protegidos: 0  •  Limpos: 0"
+			if menu.SmartRadii then
+				menu.SmartRadii.Text = string.format("Raios: %d / %d / %d st  •  Cache: 0  •  Restauracao 1:1", sp.NearRadius, sp.FarRadius, sp.CullRadius)
+			end
 			menu.SmartStroke.Color = Theme.StrokeSoft
 		end
 	end
@@ -6472,24 +7353,70 @@ function AetherUI.SetSmartPerformance(first, second)
 	end
 end
 function AetherUI.GetSmartPerformance() return SmartPerf.Enabled == true end
+function AetherUI.SetSmartPerformanceConfig(first, second)
+	local cfg = first
+	if first == AetherUI then cfg = second end
+	if typeof(cfg) ~= "table" then return end
+	local validModes = {
+		Automatico = true, Leve = true, Equilibrado = true, Agressivo = true, Ultra = true,
+	}
+	if typeof(cfg.Mode) == "string" and validModes[cfg.Mode] then
+		SmartPerf.Config.Mode = cfg.Mode
+		SmartPerf.Stats.Mode = cfg.Mode
+	end
+	if typeof(cfg.FrustumCulling) == "boolean" then SmartPerf.Config.FrustumCulling = cfg.FrustumCulling end
+	if typeof(cfg.CombatProtection) == "boolean" then SmartPerf.Config.CombatProtection = cfg.CombatProtection end
+	if typeof(cfg.EffectOptimization) == "boolean" then SmartPerf.Config.EffectOptimization = cfg.EffectOptimization end
+	if typeof(cfg.EffectCleanup) == "boolean" then SmartPerf.Config.EffectCleanup = cfg.EffectCleanup end
+	if typeof(cfg.CharacterOptimization) == "boolean" then SmartPerf.Config.CharacterOptimization = cfg.CharacterOptimization end
+	if typeof(cfg.TargetFPS) == "number" then SmartPerf.Config.TargetFPS = math.clamp(cfg.TargetFPS, 30, 120) end
+	SmartPerf.StepAccum = 1
+	SmartPerf.RestoreAccum = 1
+	for _, window in ipairs(Windows) do
+		window:_syncSettings()
+		if window:_needsPerfUpdates() then
+			window:_updatePerfViews()
+		end
+	end
+end
+function AetherUI.GetSmartPerformanceConfig()
+	local c = SmartPerf.Config
+	return {
+		Mode = c.Mode,
+		FrustumCulling = c.FrustumCulling == true,
+		CombatProtection = c.CombatProtection == true,
+		EffectOptimization = c.EffectOptimization == true,
+		EffectCleanup = c.EffectCleanup == true,
+		CharacterOptimization = c.CharacterOptimization == true,
+		TargetFPS = c.TargetFPS,
+	}
+end
 function AetherUI.GetSmartPerformanceStats()
 	local s = SmartPerf.Stats
 	return {
 		Enabled = s.Enabled == true,
+		Mode = s.Mode,
 		Profile = s.Profile,
+		IntensityPct = s.IntensityPct,
 		NearCount = s.NearCount,
 		MidCount = s.MidCount,
 		FarCount = s.FarCount,
+		CulledCount = s.CulledCount,
+		ProtectedCount = s.ProtectedCount,
+		CleanedCount = s.CleanedCount,
 		OptimizedCount = s.OptimizedCount,
 		CachedCount = s.CachedCount,
 		NearRadius = s.NearRadius,
 		FarRadius = s.FarRadius,
+		CullRadius = s.CullRadius,
 	}
 end
 
 function Window:SetSmartPerformance(value) AetherUI.SetSmartPerformance(value) end
 function Window:GetSmartPerformance() return AetherUI.GetSmartPerformance() end
 function Window:ToggleSmartPerformance() AetherUI.SetSmartPerformance(not AetherUI.GetSmartPerformance()) end
+function Window:SetSmartPerformanceConfig(cfg) AetherUI.SetSmartPerformanceConfig(cfg) end
+function Window:GetSmartPerformanceConfig() return AetherUI.GetSmartPerformanceConfig() end
 function Window:GetSmartPerformanceStats() return AetherUI.GetSmartPerformanceStats() end
 
 function AetherUI.GetPing()
@@ -6576,6 +7503,7 @@ function AetherUI.CreateWindow(config)
 		end
 	end
 
+	if typeof(config.SmartPerfConfig) == "table" then AetherUI.SetSmartPerformanceConfig(config.SmartPerfConfig) end
 	if config.SmartPerformance ~= nil then AetherUI.SetSmartPerformance(config.SmartPerformance) end
 
 	if self._autoLoadConfig then
@@ -6604,6 +7532,9 @@ function AetherUI.CreateWindow(config)
 							end
 							if typeof(decoded.Meta.LowPerformance) == "boolean" then
 								AetherUI.SetLowPerformance(decoded.Meta.LowPerformance)
+							end
+							if typeof(decoded.Meta.SmartPerfConfig) == "table" then
+								AetherUI.SetSmartPerformanceConfig(decoded.Meta.SmartPerfConfig)
 							end
 							if typeof(decoded.Meta.SmartPerformance) == "boolean" then
 								AetherUI.SetSmartPerformance(decoded.Meta.SmartPerformance)
