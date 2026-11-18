@@ -899,7 +899,17 @@ local function enableSmartPerf()
 		SmartPerf.ScanDone = true
 	end
 	table.insert(SmartPerf.Conns, workspace.DescendantAdded:Connect(function(inst)
-		if SmartPerf.Enabled then refreshSmartCacheEntry(inst) end
+		if not SmartPerf.Enabled then return end
+		local parent = inst.Parent
+		if parent and SmartPerf.EntryMap[parent] then
+			if inst:IsA("ProximityPrompt") or inst:IsA("ClickDetector") or inst:IsA("DragDetector")
+				or inst:IsA("TouchTransmitter") or inst:IsA("SurfaceAppearance") or inst:IsA("Texture")
+				or inst:IsA("Decal") or inst:IsA("Humanoid") or inst:IsA("AnimationController") then
+				restoreSmartEntry(SmartPerf.EntryMap[parent])
+				removeSmartEntry(parent)
+			end
+		end
+		refreshSmartCacheEntry(inst)
 	end))
 	table.insert(SmartPerf.Conns, workspace.DescendantRemoving:Connect(function(inst)
 		removeSmartEntry(inst)
@@ -1340,20 +1350,6 @@ local function clampBallPosition(position, diameter)
 		math.clamp(cx, r, math.max(viewport.X - r, r)),
 		math.clamp(cy, r, math.max(viewport.Y - r, r))
 	)
-end
-
-local function clampHudPosition(position, sizeVec)
-	local viewport = getViewport()
-	local insetTop = getGuiInset().Y
-	local pad = 6
-	local w = sizeVec and sizeVec.X or 210
-	local h = sizeVec and sizeVec.Y or 96
-	local minY = insetTop + pad
-	local maxX = math.max(pad, viewport.X - w - pad)
-	local maxY = math.max(minY, viewport.Y - h - pad)
-	local x = position.X.Scale * viewport.X + position.X.Offset
-	local y = position.Y.Scale * viewport.Y + position.Y.Offset
-	return UDim2.fromOffset(math.clamp(x, pad, maxX), math.clamp(y, minY, maxY))
 end
 
 local function makeDraggable(handle, target, connections, options)
@@ -1962,19 +1958,18 @@ function AetherUI.GetIcons()
 end
 
 local function spawnRipple(parent, position, color, sizeLimit)
-	local cfg = resolveAnim("Hover", Anim.Slow, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-	if not cfg.Active or cfg.ReduceMotion or cfg.Intensity <= 0.05 then return end
+	if State.LowPerformance then return end
 	local ripple = create("Frame", {
 		Name = "Ripple", AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = position, Size = UDim2.fromOffset(0, 0),
-		BackgroundColor3 = color or Theme.White, BackgroundTransparency = math.clamp(0.75 - 0.2 * cfg.Intensity, 0.35, 0.9),
+		BackgroundColor3 = color or Theme.White, BackgroundTransparency = 0.72,
 		ZIndex = 3, Parent = parent,
 	})
 	addCornerScale(ripple, 0.5)
-	local limit = (sizeLimit or 200) * math.clamp(0.5 + 0.5 * cfg.Intensity, 0.4, 1.5)
+	local limit = sizeLimit or 200
 	local t = tween(ripple, Anim.Slow, {
 		Size = UDim2.fromOffset(limit, limit), BackgroundTransparency = 1,
-	}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, "Hover")
+	})
 	t.Completed:Connect(function() ripple:Destroy() end)
 end
 
@@ -1985,15 +1980,12 @@ local function attachValuePop(label, strength, throttle)
 	local scale = create("UIScale", { Parent = label })
 	local last = 0
 	label:GetPropertyChangedSignal("Text"):Connect(function()
-		local cfg = resolveAnim("Hover", Anim.Normal, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-		if not cfg.Active or cfg.ReduceMotion then return end
+		if State.LowPerformance then return end
 		local now = os.clock()
 		if now - last < (throttle or 0) then return end
 		last = now
-		local delta = ((strength or 1.1) - 1) * cfg.Intensity
-		if delta <= 0.005 then return end
-		scale.Scale = 1 + delta
-		tween(scale, Anim.Normal, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, "Hover")
+		scale.Scale = strength or 1.1
+		tween(scale, Anim.Normal, { Scale = 1 }, Enum.EasingStyle.Back)
 	end)
 end
 
@@ -2032,9 +2024,7 @@ local function createStarWidget(parent, size, onActivated)
 		return hover and accentLight() or Theme.Muted
 	end
 	local function restScale()
-		if not hover then return 1 end
-		local cfg = resolveAnim("Hover", Anim.Fast)
-		return cfg.Active and (1 + 0.12 * cfg.Intensity) or 1
+		return hover and 1.12 or 1
 	end
 
 	function widget.Set(value, animate)
@@ -2045,13 +2035,13 @@ local function createStarWidget(parent, size, onActivated)
 		if fav then
 			if animate then
 				fillWrap.Rotation = -40
-				tween(fillScale, Anim.Spring + 0.1, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, "Hover")
-				tween(fillWrap, Anim.Spring + 0.1, { Rotation = 0 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, "Hover")
+				tween(fillScale, Anim.Spring + 0.1, { Scale = 1 }, Enum.EasingStyle.Back)
+				tween(fillWrap, Anim.Spring + 0.1, { Rotation = 0 }, Enum.EasingStyle.Back)
 			else
 				fillScale.Scale = 1; fillWrap.Rotation = 0
 			end
 		else
-			if animate then tween(fillScale, Anim.Fast, { Scale = 0 }, nil, nil, "Hover") else fillScale.Scale = 0 end
+			if animate then tween(fillScale, Anim.Fast, { Scale = 0 }) else fillScale.Scale = 0 end
 		end
 	end
 	function widget.Refresh()
@@ -2064,15 +2054,15 @@ local function createStarWidget(parent, size, onActivated)
 		if visible then
 			root.Visible = true
 			if animate then
-				tween(root, Anim.Normal, { GroupTransparency = 0 }, nil, nil, "Hover")
-				tween(rootScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, "Hover")
+				tween(root, Anim.Normal, { GroupTransparency = 0 })
+				tween(rootScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
 			else
 				root.GroupTransparency = 0; rootScale.Scale = 1
 			end
 		else
 			if animate then
-				local t = tween(root, Anim.Fast, { GroupTransparency = 1 }, nil, nil, "Hover")
-				tween(rootScale, Anim.Fast, { Scale = 0.6 }, nil, nil, "Hover")
+				local t = tween(root, Anim.Fast, { GroupTransparency = 1 })
+				tween(rootScale, Anim.Fast, { Scale = 0.6 })
 				t.Completed:Connect(function()
 					if not widget.Shown then root.Visible = false end
 				end)
@@ -2085,19 +2075,18 @@ local function createStarWidget(parent, size, onActivated)
 	hit.MouseEnter:Connect(function()
 		hover = true
 		if not fav then outline:Tween(outlineColor(), Anim.Fast) end
-		tween(rootScale, Anim.Fast, { Scale = restScale() }, nil, nil, "Hover")
+		tween(rootScale, Anim.Fast, { Scale = restScale() })
 	end)
 	hit.MouseLeave:Connect(function()
 		hover = false
 		if not fav then outline:Tween(outlineColor(), Anim.Fast) end
-		tween(rootScale, Anim.Fast, { Scale = restScale() }, nil, nil, "Hover")
+		tween(rootScale, Anim.Fast, { Scale = restScale() })
 	end)
 	hit.MouseButton1Down:Connect(function()
-		local cfg = resolveAnim("Hover", Anim.Micro)
-		tween(rootScale, Anim.Micro, { Scale = 1 - 0.2 * cfg.Intensity }, nil, nil, "Hover")
+		tween(rootScale, Anim.Micro, { Scale = 0.84 })
 	end)
 	hit.MouseButton1Up:Connect(function()
-		tween(rootScale, Anim.Spring, { Scale = restScale() }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, "Hover")
+		tween(rootScale, Anim.Spring, { Scale = restScale() }, Enum.EasingStyle.Back)
 	end)
 	hit.Activated:Connect(function() safeCall(onActivated) end)
 	return widget
@@ -2195,24 +2184,20 @@ function AetherUI.Notify(first, second)
 	local height = 14 + titleHeight + (contentHeight > 0 and (contentHeight + 4) or 0) + 14
 	height = math.max(height, 54)
 
-	local nCfg = resolveAnim("Notifications", Anim.Slow, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-	local slideOffset = (nCfg.Active and nCfg.Slide) and math.round(48 * nCfg.Intensity) or 0
-	local startScale = (nCfg.Active and nCfg.Scale) and math.max(0.75, 1 - 0.14 * nCfg.Intensity) or 1
-	local startTrans = (nCfg.Active and nCfg.Fade) and 1 or 0
-
 	Notifications.Counter = Notifications.Counter + 1
+	local animated = not State.LowPerformance
 	local slot = create("Frame", {
 		Name = "Notification", LayoutOrder = Notifications.Counter,
-		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, nCfg.Active and 0 or height),
+		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, animated and 0 or height),
 		Parent = Notifications.Holder,
 	})
 	local card = create("CanvasGroup", {
 		Name = "Card", BackgroundColor3 = Theme.Surface, BackgroundTransparency = Glass.Card,
-		Position = UDim2.fromOffset(slideOffset, 0),
+		Position = UDim2.fromOffset(animated and 44 or 0, 0),
 		Size = UDim2.new(1, 0, 0, height),
-		GroupTransparency = startTrans, Parent = slot,
+		GroupTransparency = animated and 1 or 0, Parent = slot,
 	})
-	local cardScale = create("UIScale", { Scale = startScale, Parent = card })
+	local cardScale = create("UIScale", { Scale = animated and 0.9 or 1, Parent = card })
 	addCorner(card, 12)
 	addStroke(card, Theme.Stroke, 0.35, 1)
 	attachShadow(card, slot, 12, cardScale)
@@ -2237,11 +2222,11 @@ function AetherUI.Notify(first, second)
 		if icon then
 			icon.Instance.AnchorPoint = Vector2.new(0.5, 0.5)
 			icon.Instance.Position = UDim2.fromScale(0.5, 0.5)
-			if nCfg.Active and not nCfg.ReduceMotion then
+			if animated then
 				local badgeScale = create("UIScale", { Scale = 0, Parent = badge })
 				task.delay(0.1, function()
 					if badge.Parent then
-						tween(badgeScale, Anim.Spring + 0.1, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, "Notifications")
+						tween(badgeScale, Anim.Spring + 0.1, { Scale = 1 }, Enum.EasingStyle.Back)
 					end
 				end)
 			end
@@ -2296,21 +2281,17 @@ function AetherUI.Notify(first, second)
 		for index, other in ipairs(Notifications.Active) do
 			if other == entry then table.remove(Notifications.Active, index); break end
 		end
-		local dCfg = resolveAnim("Notifications", Anim.Normal, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-		if not dCfg.Active then
+		if State.LowPerformance then
 			slot:Destroy()
 			return
 		end
-		local outOffset = dCfg.Slide and math.round(48 * dCfg.Intensity) or 0
 		local out = tween(card, Anim.Normal, {
-			Position = UDim2.fromOffset(outOffset, 0),
-			GroupTransparency = dCfg.Fade and 1 or card.GroupTransparency,
-		}, Enum.EasingStyle.Quint, Enum.EasingDirection.In, "Notifications")
-		if dCfg.Scale then
-			tween(cardScale, Anim.Normal, { Scale = math.max(0.75, 1 - 0.12 * dCfg.Intensity) }, Enum.EasingStyle.Quint, Enum.EasingDirection.In, "Notifications")
-		end
+			Position = UDim2.fromOffset(44, 0),
+			GroupTransparency = 1,
+		}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+		tween(cardScale, Anim.Normal, { Scale = 0.9 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
 		out.Completed:Connect(function()
-			local shrink = tween(slot, Anim.Fast, { Size = UDim2.new(1, 0, 0, 0) }, nil, nil, "Notifications")
+			local shrink = tween(slot, Anim.Fast, { Size = UDim2.new(1, 0, 0, 0) })
 			shrink.Completed:Connect(function() slot:Destroy() end)
 		end)
 	end
@@ -2328,20 +2309,15 @@ function AetherUI.Notify(first, second)
 		overlay.MouseEnter:Connect(function() closeIcon:Tween(Theme.Text, Anim.Fast) end)
 		overlay.MouseLeave:Connect(function() closeIcon:Tween(Theme.Muted, Anim.Fast) end)
 	end
-	tween(slot, Anim.Normal, { Size = UDim2.new(1, 0, 0, height) }, nil, nil, "Notifications")
-	tween(card, Anim.Slow, { Position = UDim2.fromOffset(0, 0), GroupTransparency = 0 }, nil, nil, "Notifications")
-	if nCfg.Active and nCfg.Scale then
-		tween(cardScale, Anim.Slow, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, "Notifications")
-	end
-	if nCfg.Active and nCfg.Blur then
-		triggerBlurPulse(6 * nCfg.Intensity, nCfg.Duration)
-	end
-	if nCfg.Active and not nCfg.ReduceMotion then
+	tween(slot, Anim.Normal, { Size = UDim2.new(1, 0, 0, height) })
+	tween(card, Anim.Slow, { Position = UDim2.fromOffset(0, 0), GroupTransparency = 0 })
+	tween(cardScale, Anim.Slow, { Scale = 1 }, Enum.EasingStyle.Back)
+	if animated then
 		bar.Size = UDim2.new(0, 2, 0, 0)
-		tween(bar, Anim.Slow, { Size = UDim2.new(0, 2, 1, 0) }, nil, nil, "Notifications")
+		tween(bar, Anim.Slow, { Size = UDim2.new(0, 2, 1, 0) })
 	end
 	if progress then
-		tween(progress, duration, { Size = UDim2.new(0, 0, 0, 2) }, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, "Notifications")
+		tween(progress, duration, { Size = UDim2.new(0, 0, 0, 2) }, Enum.EasingStyle.Linear)
 	end
 	if not persistent then task.delay(duration, dismiss) end
 	return { Dismiss = dismiss, Instance = slot }
@@ -2582,44 +2558,37 @@ function Tab:AddButton(config)
 	local hovering = false
 	button.MouseEnter:Connect(function()
 		hovering = true
-		local cfg = resolveAnim("Hover", Anim.Fast)
-		tween(button, Anim.Fast, { BackgroundColor3 = Theme.ElementHover }, nil, nil, "Hover")
-		tween(stroke, Anim.Fast, { Color = accent(), Transparency = 0.55 }, nil, nil, "Hover")
+		tween(button, Anim.Fast, { BackgroundColor3 = Theme.ElementHover })
+		tween(stroke, Anim.Fast, { Color = accent(), Transparency = 0.55 })
+		tween(scale, Anim.Fast, { Scale = 1.008 })
 		chevron:Tween(accentLight(), Anim.Fast)
+		tween(chevron.Instance, Anim.Fast, { Position = UDim2.new(1, (m.Icon - 2) + 12, 0.5, 0) })
 		if lead and not lead.CustomColor then lead:Tween(accentLight(), Anim.Fast) end
-		if cfg.Active and cfg.Scale and not cfg.ReduceMotion then
-			tween(scale, Anim.Fast, { Scale = 1 + 0.008 * cfg.Intensity }, nil, nil, "Hover")
-		end
-		local nudge = (cfg.Active and cfg.Slide and not cfg.ReduceMotion) and math.round(4 * cfg.Intensity) or 0
-		tween(chevron.Instance, Anim.Fast, { Position = UDim2.new(1, (m.Icon - 2) + 8 + nudge, 0.5, 0) }, nil, nil, "Hover")
 	end)
 	button.MouseLeave:Connect(function()
 		hovering = false
-		tween(button, Anim.Fast, { BackgroundColor3 = Theme.Element }, nil, nil, "Hover")
-		tween(stroke, Anim.Fast, { Color = Theme.StrokeSoft, Transparency = 0.35 }, nil, nil, "Hover")
-		tween(scale, Anim.Fast, { Scale = 1 }, nil, nil, "Hover")
-		tween(chevron.Instance, Anim.Fast, { Position = UDim2.new(1, (m.Icon - 2) + 8, 0.5, 0) }, nil, nil, "Hover")
+		tween(button, Anim.Fast, { BackgroundColor3 = Theme.Element })
+		tween(stroke, Anim.Fast, { Color = Theme.StrokeSoft, Transparency = 0.35 })
+		tween(scale, Anim.Fast, { Scale = 1 })
+		tween(chevron.Instance, Anim.Fast, { Position = UDim2.new(1, (m.Icon - 2) + 8, 0.5, 0) })
 		chevron:Tween(Theme.Muted, Anim.Fast)
 		if lead and not lead.CustomColor then lead:Tween(Theme.SubText, Anim.Fast) end
 	end)
 	button.MouseButton1Down:Connect(function()
-		local cfg = resolveAnim("Hover", Anim.Micro)
-		tween(button, Anim.Micro, { BackgroundColor3 = accentSoft(0.3) }, nil, nil, "Hover")
-		if cfg.Active and not cfg.ReduceMotion then
-			tween(scale, Anim.Micro, { Scale = 1 - 0.025 * cfg.Intensity }, nil, nil, "Hover")
-		end
+		tween(button, Anim.Micro, { BackgroundColor3 = accentSoft(0.3) })
+		tween(scale, Anim.Micro, { Scale = 0.975 })
 	end)
 	button.MouseButton1Up:Connect(function()
-		tween(button, Anim.Fast, { BackgroundColor3 = hovering and Theme.ElementHover or Theme.Element }, nil, nil, "Hover")
-		tween(scale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, "Hover")
+		tween(button, Anim.Fast, { BackgroundColor3 = hovering and Theme.ElementHover or Theme.Element })
+		tween(scale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
 	end)
 	button.Activated:Connect(function()
-		local flash = tween(stroke, Anim.Micro, { Color = accentLight(), Transparency = 0.05 }, nil, nil, "Hover")
+		local flash = tween(stroke, Anim.Micro, { Color = accentLight(), Transparency = 0.05 })
 		flash.Completed:Connect(function(playbackState)
 			if playbackState ~= Enum.PlaybackState.Completed then return end
 			tween(stroke, Anim.Normal, hovering
 				and { Color = accent(), Transparency = 0.55 }
-				or { Color = Theme.StrokeSoft, Transparency = 0.35 }, nil, nil, "Hover")
+				or { Color = Theme.StrokeSoft, Transparency = 0.35 })
 		end)
 		safeCall(config.Callback)
 	end)
@@ -2728,20 +2697,19 @@ function Tab:AddToggle(config)
 	end
 	local function render(animate)
 		local on = state
-		setProps(switch, { BackgroundColor3 = on and accent() or Theme.OffDeep }, animate, Anim.Normal, nil, nil, "Hover")
+		setProps(switch, { BackgroundColor3 = on and accent() or Theme.OffDeep }, animate, Anim.Normal)
 		setProps(switchStroke, {
 			Color = on and accentLight() or Theme.Off,
 			Transparency = on and 0.35 or 0.15,
-		}, animate, Anim.Normal, nil, nil, "Hover")
-		setProps(glow, { BackgroundTransparency = on and 0.82 or 1 }, animate, Anim.Normal, nil, nil, "Hover")
-		setProps(knobInnerStroke, { Transparency = on and 0 or 1 }, animate, Anim.Normal, nil, nil, "Hover")
-		if animate then
-			tween(knob, Anim.Spring, { Position = knobPosition() }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, "Hover")
+		}, animate, Anim.Normal)
+		setProps(glow, { BackgroundTransparency = on and 0.82 or 1 }, animate, Anim.Normal)
+		setProps(knobInnerStroke, { Transparency = on and 0 or 1 }, animate, Anim.Normal)
+		if animate then tween(knob, Anim.Spring, { Position = knobPosition() }, Enum.EasingStyle.Back)
 		else knob.Position = knobPosition() end
 		setProps(stroke, {
 			Color = on and accent() or Theme.StrokeSoft,
 			Transparency = on and 0.5 or 0.35,
-		}, animate, Anim.Normal, nil, nil, "Hover")
+		}, animate, Anim.Normal)
 		if lead and not lead.CustomColor then
 			if animate then lead:Tween(on and accentLight() or Theme.SubText, Anim.Normal)
 			else lead:SetColor(on and accentLight() or Theme.SubText) end
@@ -2767,13 +2735,13 @@ function Tab:AddToggle(config)
 	end)
 	win:_onAccent(function(animate)
 		if state then
-			setProps(switch, { BackgroundColor3 = accent() }, animate, Anim.Normal, nil, nil, "Hover")
-			setProps(switchStroke, { Color = accentLight() }, animate, Anim.Normal, nil, nil, "Hover")
-			setProps(glow, { BackgroundColor3 = accent() }, animate, Anim.Normal, nil, nil, "Hover")
-			setProps(knobInnerStroke, { Color = accent() }, animate, Anim.Normal, nil, nil, "Hover")
+			setProps(switch, { BackgroundColor3 = accent() }, animate, Anim.Normal)
+			setProps(switchStroke, { Color = accentLight() }, animate, Anim.Normal)
+			setProps(glow, { BackgroundColor3 = accent() }, animate, Anim.Normal)
+			setProps(knobInnerStroke, { Color = accent() }, animate, Anim.Normal)
 		end
 		if lead and not lead.CustomColor then lead:SetColor(state and accentLight() or Theme.SubText) end
-		setProps(stroke, { Color = state and accent() or Theme.StrokeSoft }, animate, Anim.Normal, nil, nil, "Hover")
+		setProps(stroke, { Color = state and accent() or Theme.StrokeSoft }, animate, Anim.Normal)
 	end)
 
 	local object = { Instance = row }
@@ -2781,8 +2749,7 @@ function Tab:AddToggle(config)
 		value = value == true
 		if value == state then return end
 		state = value; render(true)
-		local hCfg = resolveAnim("Hover", Anim.Slow)
-		if value and hCfg.Active and not hCfg.ReduceMotion and hCfg.Intensity > 0.05 then
+		if value and not State.LowPerformance then
 			local pulse = create("Frame", {
 				Name = "Pulse", AnchorPoint = Vector2.new(0.5, 0.5),
 				Position = UDim2.fromScale(0.5, 0.5),
@@ -2791,10 +2758,9 @@ function Tab:AddToggle(config)
 				BackgroundTransparency = 0.55, ZIndex = 4, Parent = switch,
 			})
 			addCornerScale(pulse, 0.5)
-			local expandPx = math.round(20 * hCfg.Intensity)
 			local t = tween(pulse, Anim.Slow, {
-				Size = UDim2.new(1, expandPx, 1, expandPx), BackgroundTransparency = 1,
-			}, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, "Hover")
+				Size = UDim2.new(1, 20, 1, 20), BackgroundTransparency = 1,
+			})
 			t.Completed:Connect(function() pulse:Destroy() end)
 		end
 		if not silent then safeCall(config.Callback, state) end
@@ -2803,38 +2769,31 @@ function Tab:AddToggle(config)
 	function object:SetText(newText) label.Text = tostring(newText) end
 	self:_register("Toggle", row, function() return label.Text end)
 	row.MouseEnter:Connect(function()
-		local cfg = resolveAnim("Hover", Anim.Fast)
-		tween(row, Anim.Fast, { BackgroundColor3 = Theme.ElementHover }, nil, nil, "Hover")
-		if cfg.Active and cfg.Scale and not cfg.ReduceMotion then
-			tween(rowScale, Anim.Fast, { Scale = 1 + 0.004 * cfg.Intensity }, nil, nil, "Hover")
-		end
+		tween(row, Anim.Fast, { BackgroundColor3 = Theme.ElementHover })
+		tween(rowScale, Anim.Fast, { Scale = 1.004 })
 	end)
 	row.MouseLeave:Connect(function()
-		tween(row, Anim.Fast, { BackgroundColor3 = Theme.Element }, nil, nil, "Hover")
-		tween(rowScale, Anim.Fast, { Scale = 1 }, nil, nil, "Hover")
+		tween(row, Anim.Fast, { BackgroundColor3 = Theme.Element })
+		tween(rowScale, Anim.Fast, { Scale = 1 })
 	end)
 	local function knobRest()
 		local ks = m.SwitchH - 8
-		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(ks, ks) }, nil, nil, "Hover")
+		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(ks, ks) })
 	end
 	row.MouseButton1Down:Connect(function()
-		local cfg = resolveAnim("Hover", Anim.Micro)
-		if cfg.Active and not cfg.ReduceMotion then
-			tween(rowScale, Anim.Micro, { Scale = 1 - 0.01 * cfg.Intensity }, nil, nil, "Hover")
-		end
+		tween(rowScale, Anim.Micro, { Scale = 0.99 })
 		local ks = m.SwitchH - 8
-		-- knob estica no toque; se ligado, compensa a posicao para nao vazar da pilula
 		tween(knob, Anim.Micro, {
 			Size = UDim2.fromOffset(ks + 4, ks),
 			Position = state and UDim2.new(1, -(ks + 8), 0.5, 0) or UDim2.new(0, 4, 0.5, 0),
-		}, nil, nil, "Hover")
-		tween(glow, Anim.Fast, { BackgroundTransparency = state and 0.7 or 0.9 }, nil, nil, "Hover")
+		})
+		tween(glow, Anim.Fast, { BackgroundTransparency = state and 0.7 or 0.9 })
 	end)
 	row.MouseButton1Up:Connect(function()
-		tween(rowScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, "Hover")
+		tween(rowScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
 		local ks = m.SwitchH - 8
-		tween(knob, Anim.Spring, { Size = UDim2.fromOffset(ks, ks), Position = knobPosition() }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, "Hover")
-		tween(glow, Anim.Normal, { BackgroundTransparency = state and 0.82 or 1 }, nil, nil, "Hover")
+		tween(knob, Anim.Spring, { Size = UDim2.fromOffset(ks, ks), Position = knobPosition() }, Enum.EasingStyle.Back)
+		tween(glow, Anim.Normal, { BackgroundTransparency = state and 0.82 or 1 })
 	end)
 	row.MouseLeave:Connect(knobRest)
 	row.InputBegan:Connect(function(input)
@@ -3157,8 +3116,8 @@ local function buildDropdownShell(tab, config, className)
 			Transparency = active and 0.55 or 0.35,
 		}
 		if animate then
-			tween(rootStroke, Anim.Fast, props, nil, nil, "Hover")
-			tween(root, Anim.Fast, { BackgroundColor3 = headerHover and Theme.ElementHover or Theme.Element }, nil, nil, "Hover")
+			tween(rootStroke, Anim.Fast, props)
+			tween(root, Anim.Fast, { BackgroundColor3 = headerHover and Theme.ElementHover or Theme.Element })
 			chevron:Tween(active and accentLight() or Theme.Muted, Anim.Fast)
 		else
 			rootStroke.Color = props.Color; rootStroke.Transparency = props.Transparency
@@ -3176,25 +3135,23 @@ local function buildDropdownShell(tab, config, className)
 		paintHeader(animate)
 		local panelH, content = heights()
 		scroll.ScrollingEnabled = content > panelH
-		local pCfg = resolveAnim("Panels", Anim.Fast)
-		local doAnim = animate and pCfg.Active
+		local doAnim = animate and not State.LowPerformance
 		if value then
 			win:_closeDropdowns(token)
 			win._openDropdowns[token] = true
 			panel.Visible = true
 			if doAnim then
-				panel.GroupTransparency = pCfg.Fade and 1 or 0
-				panelScale.Scale = pCfg.Scale and math.max(0.88, 1 - 0.08 * pCfg.Intensity) or 1
-				panel.Position = UDim2.fromOffset(0, m.Row - (pCfg.Slide and math.round(8 * pCfg.Intensity) or 0))
+				panel.GroupTransparency = 1
+				panelScale.Scale = 0.94
+				panel.Position = UDim2.fromOffset(0, m.Row - 6)
 				tween(panel, Anim.Fast, {
 					Size = UDim2.new(1, 0, 0, panelH),
 					Position = UDim2.fromOffset(0, m.Row),
 					GroupTransparency = 0,
-				}, nil, nil, "Panels")
-				tween(panelScale, Anim.Fast, { Scale = 1 }, nil, nil, "Panels")
-				tween(root, Anim.Fast, { Size = UDim2.new(1, 0, 0, m.Row + panelH) }, nil, nil, "Panels")
-				tween(chevron.Instance, Anim.Fast, { Rotation = 180 }, nil, nil, "Panels")
-				if pCfg.Blur then triggerBlurPulse(6 * pCfg.Intensity, pCfg.Duration) end
+				})
+				tween(panelScale, Anim.Fast, { Scale = 1 })
+				tween(root, Anim.Fast, { Size = UDim2.new(1, 0, 0, m.Row + panelH) })
+				tween(chevron.Instance, Anim.Fast, { Rotation = 180 })
 			else
 				panel.GroupTransparency = 0
 				panelScale.Scale = 1
@@ -3213,16 +3170,11 @@ local function buildDropdownShell(tab, config, className)
 		else
 			win._openDropdowns[token] = nil
 			if doAnim then
-				tween(panel, Anim.Fast, {
-					Size = UDim2.new(1, 0, 0, 0),
-					GroupTransparency = pCfg.Fade and 1 or 0,
-				}, nil, nil, "Panels")
-				if pCfg.Scale then
-					tween(panelScale, Anim.Fast, { Scale = math.max(0.9, 1 - 0.06 * pCfg.Intensity) }, nil, nil, "Panels")
-				end
-				tween(root, Anim.Fast, { Size = UDim2.new(1, 0, 0, m.Row) }, nil, nil, "Panels")
-				tween(chevron.Instance, Anim.Fast, { Rotation = 0 }, nil, nil, "Panels")
-				task.delay(pCfg.Duration + 0.03, function()
+				tween(panel, Anim.Fast, { Size = UDim2.new(1, 0, 0, 0), GroupTransparency = 1 })
+				tween(panelScale, Anim.Fast, { Scale = 0.94 })
+				tween(root, Anim.Fast, { Size = UDim2.new(1, 0, 0, m.Row) })
+				tween(chevron.Instance, Anim.Fast, { Rotation = 0 })
+				task.delay(Anim.Fast + 0.03, function()
 					if not shell.Expanded then
 						panel.Visible = false
 						panelScale.Scale = 1
@@ -4199,26 +4151,24 @@ function Tab:AddColorPicker(config)
 		value = value == true
 		if value == expanded then return end
 		expanded = value
-		local pCfg = resolveAnim("Panels", Anim.Fast)
-		local doAnim = animate and pCfg.Active
+		local doAnim = animate and not State.LowPerformance
 		if value then
 			win:_closeDropdowns(token)
 			win._openDropdowns[token] = true
 			panel.Visible = true
 			local ph = contentHeight()
 			if doAnim then
-				panel.GroupTransparency = pCfg.Fade and 1 or 0
-				panelScale.Scale = pCfg.Scale and math.max(0.88, 1 - 0.08 * pCfg.Intensity) or 1
-				panel.Position = UDim2.fromOffset(0, m.Row - (pCfg.Slide and math.round(8 * pCfg.Intensity) or 0))
+				panel.GroupTransparency = 1
+				panelScale.Scale = 0.94
+				panel.Position = UDim2.fromOffset(0, m.Row - 6)
 				tween(panel, Anim.Fast, {
 					Size = UDim2.new(1, 0, 0, ph),
 					Position = UDim2.fromOffset(0, m.Row),
 					GroupTransparency = 0,
-				}, nil, nil, "Panels")
-				tween(panelScale, Anim.Fast, { Scale = 1 }, nil, nil, "Panels")
-				tween(root, Anim.Fast, { Size = UDim2.new(1, 0, 0, m.Row + ph) }, nil, nil, "Panels")
-				tween(chevron.Instance, Anim.Fast, { Rotation = 180 }, nil, nil, "Panels")
-				if pCfg.Blur then triggerBlurPulse(6 * pCfg.Intensity, pCfg.Duration) end
+				})
+				tween(panelScale, Anim.Fast, { Scale = 1 })
+				tween(root, Anim.Fast, { Size = UDim2.new(1, 0, 0, m.Row + ph) })
+				tween(chevron.Instance, Anim.Fast, { Rotation = 180 })
 			else
 				panel.GroupTransparency = 0
 				panelScale.Scale = 1
@@ -4238,16 +4188,11 @@ function Tab:AddColorPicker(config)
 			endDrag()
 			win._openDropdowns[token] = nil
 			if doAnim then
-				tween(panel, Anim.Fast, {
-					Size = UDim2.new(1, 0, 0, 0),
-					GroupTransparency = pCfg.Fade and 1 or 0,
-				}, nil, nil, "Panels")
-				if pCfg.Scale then
-					tween(panelScale, Anim.Fast, { Scale = math.max(0.9, 1 - 0.06 * pCfg.Intensity) }, nil, nil, "Panels")
-				end
-				tween(root, Anim.Fast, { Size = UDim2.new(1, 0, 0, m.Row) }, nil, nil, "Panels")
-				tween(chevron.Instance, Anim.Fast, { Rotation = 0 }, nil, nil, "Panels")
-				task.delay(pCfg.Duration + 0.03, function()
+				tween(panel, Anim.Fast, { Size = UDim2.new(1, 0, 0, 0), GroupTransparency = 1 })
+				tween(panelScale, Anim.Fast, { Scale = 0.94 })
+				tween(root, Anim.Fast, { Size = UDim2.new(1, 0, 0, m.Row) })
+				tween(chevron.Instance, Anim.Fast, { Rotation = 0 })
+				task.delay(Anim.Fast + 0.03, function()
 					if not expanded then
 						panel.Visible = false
 						panelScale.Scale = 1
@@ -4332,10 +4277,9 @@ end
 
 -- Escala de repouso: aba selecionada fica ligeiramente maior.
 function Tab:_restScale()
-	local cfg = resolveAnim("Hover", Anim.Smooth)
-	local mult = (cfg.Active and cfg.Scale and not cfg.ReduceMotion) and cfg.Intensity or 0
-	if self._window._selectedTab == self then return 1 + 0.035 * mult end
-	if self._hover then return 1 + 0.01 * mult end
+	if State.LowPerformance then return 1 end
+	if self._window._selectedTab == self then return 1.035 end
+	if self._hover then return 1.01 end
 	return 1
 end
 
@@ -4347,7 +4291,7 @@ function Tab:_applyLabelWidth(animate)
 		extra = starSize() + 10
 	end
 	local size = UDim2.new(1, -(m.SideRow + extra), 1, 0)
-	if animate then tween(self._label, Anim.Smooth, { Size = size }, nil, nil, "Sidebar")
+	if animate then tween(self._label, Anim.Smooth, { Size = size })
 	else self._label.Size = size end
 end
 
@@ -4356,7 +4300,7 @@ function Tab:_applyStarGutter(animate)
 	local m = self._metrics
 	local extra = (self._window._starsOn and not self._isFavorites) and STAR_GUTTER or 0
 	local target = UDim.new(0, m.Pad + extra)
-	if animate then tween(self._pagePadding, Anim.Smooth, { PaddingRight = target }, nil, nil, "Sidebar")
+	if animate then tween(self._pagePadding, Anim.Smooth, { PaddingRight = target })
 	else self._pagePadding.PaddingRight = target end
 end
 
@@ -4373,11 +4317,11 @@ function Tab:_paint(animate)
 	local iconColor = selected and accentLight() or (hovering and Theme.Text or Theme.SubText)
 	local backgroundTransparency = hovering and 0.5 or 1
 	if animate then
-		tween(self._button, Anim.Fast, { BackgroundTransparency = backgroundTransparency }, nil, nil, "Hover")
-		tween(self._label, Anim.Normal, { TextColor3 = textColor }, nil, nil, "Hover")
+		tween(self._button, Anim.Fast, { BackgroundTransparency = backgroundTransparency })
+		tween(self._label, Anim.Normal, { TextColor3 = textColor })
 		if self._icon and not self._icon.CustomColor then self._icon:Tween(iconColor, Anim.Normal) end
 		if self._scaleObj and not self._pressed then
-			tween(self._scaleObj, Anim.Smooth, { Scale = self:_restScale() }, nil, nil, "Hover")
+			tween(self._scaleObj, Anim.Smooth, { Scale = self:_restScale() })
 		end
 	else
 		self._button.BackgroundTransparency = backgroundTransparency
@@ -4393,14 +4337,13 @@ function Tab:_applyCollapse(collapsed, animate)
 	self._collapsed = collapsed
 	self:_updateTabStar(animate)
 	self:_applyLabelWidth(animate)
-	local sCfg = resolveAnim("Sidebar", Anim.Normal)
-	local slidePx = (sCfg.Active and sCfg.Slide and not sCfg.ReduceMotion) and math.round(8 * sCfg.Intensity) or 0
+	local doAnim = animate and not State.LowPerformance
 	if collapsed then
-		if animate and sCfg.Active then
+		if doAnim then
 			local t = tween(label, Anim.Fast, {
 				TextTransparency = 1,
-				Position = UDim2.fromOffset(m.SideRow - slidePx, 0),
-			}, nil, nil, "Sidebar")
+				Position = UDim2.fromOffset(m.SideRow - 8, 0),
+			})
 			t.Completed:Connect(function()
 				if self._collapsed then
 					label.Visible = false
@@ -4414,13 +4357,13 @@ function Tab:_applyCollapse(collapsed, animate)
 		end
 	else
 		label.Visible = true
-		if animate and sCfg.Active then
-			label.TextTransparency = sCfg.Fade and 1 or 0
-			label.Position = UDim2.fromOffset(m.SideRow - slidePx, 0)
+		if doAnim then
+			label.TextTransparency = 1
+			label.Position = UDim2.fromOffset(m.SideRow - 8, 0)
 			tween(label, Anim.Normal, {
 				TextTransparency = 0,
 				Position = UDim2.fromOffset(m.SideRow, 0),
-			}, nil, nil, "Sidebar")
+			})
 		else
 			label.TextTransparency = 0
 			label.Position = UDim2.fromOffset(m.SideRow, 0)
@@ -4447,8 +4390,9 @@ end
 function Window:_ordered()
 	local list = {}
 	for _, tab in ipairs(self._tabs) do
-		if not tab._isSettings and not tab._isFavorites then table.insert(list, tab) end
+		if not tab._isSettings and not tab._isFavorites and not tab._isMenu then table.insert(list, tab) end
 	end
+	if self._menuTab then table.insert(list, self._menuTab) end
 	if self._favoritesTab then table.insert(list, self._favoritesTab) end
 	if self._settingsTab then table.insert(list, self._settingsTab) end
 	return list
@@ -4459,7 +4403,7 @@ function Window:_layoutSidebar()
 	local y = 0
 	local separated = false
 	for _, tab in ipairs(self:_ordered()) do
-		if (tab._isSettings or tab._isFavorites) and not separated then
+		if (tab._isMenu or tab._isFavorites or tab._isSettings) and not separated then
 			separated = true
 			y = y + 4
 			self._separator.Position = UDim2.new(0, 4, 0, y)
@@ -4471,7 +4415,7 @@ function Window:_layoutSidebar()
 		tab._button.Size = UDim2.new(1, 0, 0, m.SideRow)
 		y = y + m.SideRow + m.SideGap
 	end
-	self._separator.Visible = self._settingsTab ~= nil or self._favoritesTab ~= nil
+	self._separator.Visible = self._menuTab ~= nil or self._settingsTab ~= nil or self._favoritesTab ~= nil
 	self._list.CanvasSize = UDim2.fromOffset(0, y + 4)
 end
 
@@ -4493,26 +4437,24 @@ function Window:_moveIndicator(animate)
 	local firstShow = not self._highlight.Visible
 	self._highlight.Visible = true
 	self._indicator.Visible = true
-	if self._indicatorGlow then self._indicatorGlow.Visible = true end
-	local tCfg = resolveAnim("Tabs", Anim.Smooth)
-	if animate and not firstShow and tCfg.Active then
+	if self._indicatorGlow then self._indicatorGlow.Visible = not State.LowPerformance end
+	if animate and not firstShow and not State.LowPerformance then
 		local dist = math.abs(indicatorProps.Position.Y.Offset - self._indicator.Position.Y.Offset)
-		tween(self._highlight, Anim.Smooth, highlightProps, nil, nil, "Tabs")
-		tween(self._indicator, Anim.Smooth, { Position = indicatorProps.Position }, nil, nil, "Tabs")
+		tween(self._highlight, Anim.Smooth, highlightProps)
+		tween(self._indicator, Anim.Smooth, { Position = indicatorProps.Position })
 		if self._indicatorGlow then
-			tween(self._indicatorGlow, Anim.Smooth, { Position = glowProps.Position, Size = glowProps.Size }, nil, nil, "Tabs")
+			tween(self._indicatorGlow, Anim.Smooth, { Position = glowProps.Position, Size = glowProps.Size })
 		end
-		-- Leve alongamento do indicador durante o deslize.
-		local stretch = math.min(dist * 0.3 * tCfg.Intensity, 16)
-		if stretch > 1 and not tCfg.ReduceMotion then
-			local grow = tween(self._indicator, Anim.Fast, { Size = UDim2.fromOffset(3, indicatorHeight + stretch) }, nil, nil, "Tabs")
+		local stretch = math.min(dist * 0.28, 14)
+		if stretch > 1 then
+			local grow = tween(self._indicator, Anim.Fast, { Size = UDim2.fromOffset(3, indicatorHeight + stretch) })
 			grow.Completed:Connect(function(playbackState)
 				if playbackState == Enum.PlaybackState.Completed then
-					tween(self._indicator, Anim.Normal, { Size = indicatorProps.Size }, nil, nil, "Tabs")
+					tween(self._indicator, Anim.Normal, { Size = indicatorProps.Size })
 				end
 			end)
 		else
-			tween(self._indicator, Anim.Fast, { Size = indicatorProps.Size }, nil, nil, "Tabs")
+			tween(self._indicator, Anim.Fast, { Size = indicatorProps.Size })
 		end
 	else
 		for k, v in pairs(highlightProps) do self._highlight[k] = v end
@@ -4558,8 +4500,8 @@ function Window:_applyLayout(animate)
 	local contentPosition = UDim2.fromOffset(sidebarWidth, 0)
 	local contentSize = UDim2.new(1, -sidebarWidth, 1, 0)
 	if animate then
-		tween(self._sidebar, Anim.Normal, { Size = sidebarSize }, nil, nil, "Sidebar")
-		tween(self._content, Anim.Normal, { Position = contentPosition, Size = contentSize }, nil, nil, "Sidebar")
+		tween(self._sidebar, Anim.Normal, { Size = sidebarSize })
+		tween(self._content, Anim.Normal, { Position = contentPosition, Size = contentSize })
 	else
 		self._sidebar.Size = sidebarSize
 		self._content.Position = contentPosition
@@ -4598,7 +4540,7 @@ function Window:_resize(animate)
 	local size = self:_getSize()
 	local position = clampWindowPosition(self._root.Position, size)
 	if animate then
-		tween(self._root, Anim.Normal, { Size = size, Position = position }, nil, nil, "Window")
+		tween(self._root, Anim.Normal, { Size = size, Position = position })
 	else
 		self._root.Size = size
 		self._root.Position = position
@@ -4618,17 +4560,15 @@ function Window:_applyPerformance()
 	for _, gradient in ipairs(self._gradients) do
 		pcall(function() gradient.Enabled = not lowPerformance end)
 	end
-	local ballCfg = resolveAnim("Ball", Anim.Normal)
-	local pulseOn = not lowPerformance and ballCfg.Active and not ballCfg.ReduceMotion
-	if not pulseOn then
+	if lowPerformance then
 		if self._pulse then self._pulse:Cancel(); self._pulse = nil end
 		self._ballStroke.Transparency = 0.35
-		if lowPerformance and self._indicatorGlow then self._indicatorGlow.Visible = false end
+		if self._indicatorGlow then self._indicatorGlow.Visible = false end
 	elseif self._state == "Minimized" and self._ball.Visible and not self._pulse then
 		self._ballStroke.Transparency = 0.7
 		self._pulse = TweenService:Create(
 			self._ballStroke,
-			TweenInfo.new(1.1 / math.max((AnimConfig.Speed or 1), 0.35), Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
 			{ Transparency = 0.2 }
 		)
 		self._pulse:Play()
@@ -4644,8 +4584,7 @@ function Window:_syncSettings()
 	controls.Compact:Set(self._compact == true)
 	controls.Sidebar:Set(self._collapsed == true)
 	controls.LowPerformance:Set(State.LowPerformance == true)
-	if controls.SyncAnimations then controls.SyncAnimations() end
-	if controls.SyncMonitor then controls.SyncMonitor() end
+	if controls.SmartPerf then controls.SmartPerf:Set(SmartPerf.Enabled == true, true) end
 	controls.SyncAccent()
 	self._syncing = false
 end
@@ -4655,21 +4594,19 @@ function Window:_selectTab(tab, animate)
 	local previous = self._selectedTab
 	self._selectedTab = tab
 	self:_closeDropdowns()
-	local tCfg = resolveAnim("Tabs", Anim.Normal + 0.05)
-	local doAnim = animate and tCfg.Active
+	local doAnim = animate and not State.LowPerformance
 	local direction = 1
 	if previous and previous._y and tab._y and tab._y < previous._y then direction = -1 end
 	for _, other in ipairs(self._tabs) do
 		if other ~= tab then
 			if doAnim and other == previous and other._holder.Visible then
-				local outProps = { GroupTransparency = tCfg.Fade and 1 or other._holder.GroupTransparency }
-				if tCfg.Slide then
-					outProps.Position = UDim2.fromOffset(0, math.round(-12 * tCfg.Intensity * direction))
+				if other._holderScale then
+					tween(other._holderScale, Anim.Fast, { Scale = 0.97 })
 				end
-				if tCfg.Scale and other._holderScale then
-					tween(other._holderScale, Anim.Fast, { Scale = math.max(0.88, 1 - 0.04 * tCfg.Intensity) }, nil, nil, "Tabs")
-				end
-				local fade = tween(other._holder, Anim.Fast, outProps, nil, nil, "Tabs")
+				local fade = tween(other._holder, Anim.Fast, {
+					GroupTransparency = 1,
+					Position = UDim2.fromOffset(0, -10 * direction),
+				})
 				fade.Completed:Connect(function(playbackState)
 					if playbackState == Enum.PlaybackState.Completed and self._selectedTab ~= other then
 						other._holder.Visible = false
@@ -4688,12 +4625,11 @@ function Window:_selectTab(tab, animate)
 	local metrics = self._metrics
 	self._header.Text = tab._name
 	if doAnim then
-		local hSlide = tCfg.Slide and math.round(10 * tCfg.Intensity) or 0
-		self._header.TextTransparency = tCfg.Fade and 1 or 0
-		self._header.Position = UDim2.fromOffset(metrics.Pad + 4 + hSlide, 8)
+		self._header.TextTransparency = 1
+		self._header.Position = UDim2.fromOffset(metrics.Pad + 12, 8)
 		tween(self._header, Anim.Normal + 0.05, {
 			TextTransparency = 0, Position = UDim2.fromOffset(metrics.Pad + 4, 8),
-		}, nil, nil, "Tabs")
+		})
 	else
 		self._header.TextTransparency = 0
 		self._header.Position = UDim2.fromOffset(metrics.Pad + 4, 8)
@@ -4703,20 +4639,15 @@ function Window:_selectTab(tab, animate)
 	holder.Visible = true
 	tab:_refresh()
 	if doAnim then
-		local slideY = tCfg.Slide and math.round(14 * tCfg.Intensity * direction) or 0
-		local startScale = tCfg.Scale and math.max(0.86, 1 - 0.05 * tCfg.Intensity) or 1
-		holder.Position = UDim2.fromOffset(0, slideY)
-		holder.GroupTransparency = tCfg.Fade and 1 or 0
+		holder.Position = UDim2.fromOffset(0, 12 * direction)
+		holder.GroupTransparency = 1
 		if tab._holderScale then
-			tab._holderScale.Scale = startScale
-			tween(tab._holderScale, Anim.Normal + 0.05, { Scale = 1 }, nil, nil, "Tabs")
+			tab._holderScale.Scale = 0.96
+			tween(tab._holderScale, Anim.Normal + 0.05, { Scale = 1 })
 		end
 		tween(holder, Anim.Normal + 0.05, {
 			Position = UDim2.fromOffset(0, 0), GroupTransparency = 0,
-		}, nil, nil, "Tabs")
-		if tCfg.Blur then
-			triggerBlurPulse(4 * tCfg.Intensity, tCfg.Duration * 0.75)
-		end
+		})
 	else
 		holder.Position = UDim2.fromOffset(0, 0)
 		holder.GroupTransparency = 0
