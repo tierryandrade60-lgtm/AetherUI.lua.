@@ -1,21 +1,23 @@
 --[[
-	AetherUI v2.8.0 - arquivo unico (Parte 1/3 + 2/3 + 3/3 ja unidas)
+	AetherUI v2.9.0 - arquivo unico (Parte 1/3 + 2/3 + 3/3 ja unidas)
 	Inclui: cabecalho, tema, estado, utilitarios, biblioteca expandida de icones,
 	        notificacoes (DisplayOrder 990, abaixo da UI),
 	        Section, Label, Button, Toggle, Slider, Dropdown, MultiDropdown,
 	        RadioGroup, ColorPicker, Search global, Favoritos, Save Configuration,
-	        Sistema de Animacoes & Transicoes configuravel e Performance Monitor.
+	        aba Menu (FPS, Ping, Uptime, Grafico de FPS, Smart Performance Anti-Lag)
+	        e animacoes nativas padronizadas.
 	Cole TODO este arquivo em um unico ModuleScript ou carregue via loadstring.
 
-	v2.8.0 (Animacoes & Transicoes Configuraveis + Performance Monitor):
-	  - Sistema completo de Animacoes: controle global e individual por categoria
-	    (Window, Panels, Hover, Tabs, Sidebar, Ball/Dock, Notifications), velocidade,
-	    EasingStyle, intensidade, efeitos (Fade, Slide, Scale, Blur e combinacoes)
-	    e modo Reduzir Movimento (ReduceMotion).
-	  - Performance Monitor em tempo real: FPS, FrameTime (ms), Uptime, Elementos
-	    ativos, GuiObjects, Tweens ativos, Conexoes e Memoria (MB), integrado na
-	    aba Interface e como HUD flutuante arrastavel (compacto ou expandido).
-	  - ExportConfig / ImportConfig / AutoLoad salvam e restauram Animacoes e HUD.
+	v2.9.0 (Aba Menu + Smart Performance Anti-Lag + Animacoes Padronizadas):
+	  - Nova aba Menu: FPS em tempo real, Ping em tempo real, Uptime da biblioteca,
+	    Grafico de desempenho com historico de FPS e Smart Performance.
+	  - Smart Performance (Anti-Lag avancado baseado em distancia): preserva 100%
+	    objetos proximos, personagens, ferramentas, colisoes, fisica, efeitos e
+	    objetos interativos; aplica LOD e reducao gradual de custo visual em zonas
+	    intermediaria e distante com histerese anti-oscilacao, cache espacial,
+	    lotes com orcamento de frame e restauracao total ao desativar.
+	  - Animacoes nativas padronizadas internamente (janela, hover, abas, sidebar,
+	    bolinha e notificacoes) sem menus extras.
 
 	v2.7.0 (Mobile + Bolinha + ColorPicker + RadioGroup + Save Config + Icones):
 	  - Floating Ball (Bolinha): aparece SOMENTE quando o painel principal esta
@@ -54,7 +56,7 @@ local HttpService = game:GetService("HttpService")
 local LibraryStartClock = os.clock()
 
 local AetherUI = {}
-AetherUI.Version = "2.8.0"
+AetherUI.Version = "2.9.0"
 
 local Window = {}
 Window.__index = Window
@@ -140,338 +142,13 @@ local function create(className, props, children)
 end
 
 -- ===================================================================
--- Configuracao de Animacoes, Efeitos (Fade/Slide/Scale/Blur) & Blur
--- ===================================================================
-local EasingStyleOptions = {
-	"Auto", "Quint", "Sine", "Quad", "Cubic", "Back", "Exponential", "Circular", "Linear",
-}
-local EasingStyleLookup = {
-	auto = "Auto",
-	quint = Enum.EasingStyle.Quint,
-	sine = Enum.EasingStyle.Sine,
-	quad = Enum.EasingStyle.Quad,
-	cubic = Enum.EasingStyle.Cubic,
-	back = Enum.EasingStyle.Back,
-	exponential = Enum.EasingStyle.Exponential,
-	expo = Enum.EasingStyle.Exponential,
-	circular = Enum.EasingStyle.Circular,
-	circ = Enum.EasingStyle.Circular,
-	linear = Enum.EasingStyle.Linear,
-}
-local EasingDirectionLookup = {
-	out = Enum.EasingDirection.Out,
-	["in"] = Enum.EasingDirection.In,
-	inout = Enum.EasingDirection.InOut,
-}
-local EffectOptions = {
-	"Fade+Scale", "Fade+Slide", "Slide+Scale", "Fade+Scale+Blur",
-	"Fade", "Slide", "Scale", "Blur", "None",
-}
-local EffectFlagsCache = {}
-local function parseEffectFlags(effectName)
-	local key = string.lower(tostring(effectName or "Fade+Scale"))
-	local cached = EffectFlagsCache[key]
-	if cached then return cached end
-	if key == "none" or key == "nenhum" or key == "" then
-		cached = { Fade = false, Slide = false, Scale = false, Blur = false }
-	else
-		cached = {
-			Fade = string.find(key, "fade", 1, true) ~= nil,
-			Slide = string.find(key, "slide", 1, true) ~= nil,
-			Scale = string.find(key, "scale", 1, true) ~= nil,
-			Blur = string.find(key, "blur", 1, true) ~= nil,
-		}
-		if not cached.Fade and not cached.Slide and not cached.Scale and not cached.Blur then
-			cached.Fade = true
-		end
-	end
-	EffectFlagsCache[key] = cached
-	return cached
-end
-
-local AnimCategoryOrder = {
-	"Window", "Panels", "Hover", "Tabs", "Sidebar", "Ball", "Notifications",
-}
-local AnimCategoryLabels = {
-	Window = "Janela",
-	Panels = "Paineis",
-	Hover = "Hover & Botoes",
-	Tabs = "Abas",
-	Sidebar = "Sidebar",
-	Ball = "Bolinha / Dock",
-	Notifications = "Notificacoes",
-}
-local AnimCategoryAliases = {
-	window = "Window",
-	janela = "Window",
-	panels = "Panels",
-	panel = "Panels",
-	paineis = "Panels",
-	dropdown = "Panels",
-	hover = "Hover",
-	elements = "Hover",
-	buttons = "Hover",
-	botoes = "Hover",
-	tabs = "Tabs",
-	tab = "Tabs",
-	abas = "Tabs",
-	sidebar = "Sidebar",
-	ball = "Ball",
-	bolinha = "Ball",
-	dock = "Ball",
-	floating = "Ball",
-	["bolinha / dock"] = "Ball",
-	notifications = "Notifications",
-	notification = "Notifications",
-	notify = "Notifications",
-	notificacoes = "Notifications",
-}
-local function resolveCategoryKey(name)
-	if name == nil then return nil end
-	local clean = string.lower((string.gsub(tostring(name), "^%s*(.-)%s*$", "%1")))
-	if AnimCategoryAliases[clean] then return AnimCategoryAliases[clean] end
-	for key, label in pairs(AnimCategoryLabels) do
-		if string.lower(label) == clean then return key end
-	end
-	return nil
-end
-
-local function createDefaultAnimConfig()
-	return {
-		Enabled = true,
-		ReduceMotion = false,
-		Speed = 1,
-		Style = "Auto",
-		Direction = "Out",
-		Intensity = 1,
-		Effect = "Fade+Scale",
-		Categories = {
-			Window        = { Enabled = true, Effect = "Fade+Scale", Speed = 1, Style = "Auto", Direction = "Out", Intensity = 1 },
-			Panels        = { Enabled = true, Effect = "Fade+Slide", Speed = 1, Style = "Auto", Direction = "Out", Intensity = 1 },
-			Hover         = { Enabled = true, Effect = "Fade+Scale", Speed = 1, Style = "Auto", Direction = "Out", Intensity = 1 },
-			Tabs          = { Enabled = true, Effect = "Fade+Slide", Speed = 1, Style = "Auto", Direction = "Out", Intensity = 1 },
-			Sidebar       = { Enabled = true, Effect = "Fade+Slide", Speed = 1, Style = "Auto", Direction = "Out", Intensity = 1 },
-			Ball          = { Enabled = true, Effect = "Fade+Scale", Speed = 1, Style = "Auto", Direction = "Out", Intensity = 1 },
-			Notifications = { Enabled = true, Effect = "Fade+Slide", Speed = 1, Style = "Auto", Direction = "Out", Intensity = 1 },
-		},
-	}
-end
-
-local AnimConfig = createDefaultAnimConfig()
-
-local function normalizeStyleName(value, allowAuto)
-	if typeof(value) == "EnumItem" and value.EnumType == Enum.EasingStyle then
-		return value.Name
-	end
-	local lower = string.lower(tostring(value or ""))
-	if lower == "auto" and allowAuto then return "Auto" end
-	local mapped = EasingStyleLookup[lower]
-	if mapped == "Auto" then return allowAuto and "Auto" or "Quint" end
-	if mapped then return mapped.Name end
-	return allowAuto and "Auto" or "Quint"
-end
-
-local function normalizeDirectionName(value)
-	if typeof(value) == "EnumItem" and value.EnumType == Enum.EasingDirection then
-		return value.Name
-	end
-	local mapped = EasingDirectionLookup[string.lower(tostring(value or ""))]
-	return mapped and mapped.Name or "Out"
-end
-
-local function normalizeEffectName(value)
-	local s = string.lower(tostring(value or ""))
-	for _, option in ipairs(EffectOptions) do
-		if string.lower(option) == s then return option end
-	end
-	local flags = parseEffectFlags(s)
-	if not flags.Fade and not flags.Slide and not flags.Scale and not flags.Blur then return "None" end
-	local parts = {}
-	if flags.Fade then table.insert(parts, "Fade") end
-	if flags.Slide then table.insert(parts, "Slide") end
-	if flags.Scale then table.insert(parts, "Scale") end
-	if flags.Blur then table.insert(parts, "Blur") end
-	return table.concat(parts, "+")
-end
-
-local function resolveEasingStyle(styleName, fallbackStyle)
-	if styleName and styleName ~= "Auto" then
-		local mapped = EasingStyleLookup[string.lower(tostring(styleName))]
-		if typeof(mapped) == "EnumItem" then return mapped end
-	end
-	return fallbackStyle or Enum.EasingStyle.Quint
-end
-
-local function resolveEasingDirection(dirName, fallbackDirection)
-	if fallbackDirection then return fallbackDirection end
-	local mapped = EasingDirectionLookup[string.lower(tostring(dirName or ""))]
-	return mapped or Enum.EasingDirection.Out
-end
-
-local function resolveAnim(category, baseDuration, defaultStyle, defaultDirection)
-	local catKey = resolveCategoryKey(category)
-	local catCfg = catKey and AnimConfig.Categories[catKey] or nil
-	if State.LowPerformance or not AnimConfig.Enabled or (catCfg and not catCfg.Enabled) then
-		return {
-			Active = false, Duration = 0,
-			Style = Enum.EasingStyle.Linear, Direction = Enum.EasingDirection.Out,
-			Intensity = 0, Effect = "None",
-			Fade = false, Slide = false, Scale = false, Blur = false,
-			ReduceMotion = AnimConfig.ReduceMotion == true,
-		}
-	end
-
-	local rawDur = baseDuration or Anim.Normal
-	if AnimConfig.ReduceMotion then
-		local speed = math.clamp((AnimConfig.Speed or 1) * (catCfg and catCfg.Speed or 1), 0.3, 4)
-		local dur = math.clamp(math.min(rawDur, 0.14) / speed, 0.02, 0.35)
-		return {
-			Active = true, Duration = dur,
-			Style = Enum.EasingStyle.Sine,
-			Direction = resolveEasingDirection(AnimConfig.Direction, defaultDirection),
-			Intensity = 0.25, Effect = "Fade",
-			Fade = true, Slide = false, Scale = false, Blur = false,
-			ReduceMotion = true,
-		}
-	end
-
-	local globalSpeed = math.clamp(tonumber(AnimConfig.Speed) or 1, 0.25, 4)
-	local catSpeed = math.clamp(tonumber(catCfg and catCfg.Speed) or 1, 0.25, 4)
-	local duration = math.clamp(rawDur / (globalSpeed * catSpeed), 0.015, 3)
-
-	local globalIntensity = math.clamp(tonumber(AnimConfig.Intensity) or 1, 0, 2)
-	local catIntensity = math.clamp(tonumber(catCfg and catCfg.Intensity) or 1, 0, 2)
-	local intensity = math.clamp(globalIntensity * catIntensity, 0, 2)
-
-	local effectName = (catCfg and catCfg.Effect) or AnimConfig.Effect or "Fade+Scale"
-	local flags = parseEffectFlags(effectName)
-	local active = flags.Fade or flags.Slide or flags.Scale or flags.Blur
-
-	local chosenStyle = nil
-	if catCfg and catCfg.Style and catCfg.Style ~= "Auto" then
-		chosenStyle = catCfg.Style
-	elseif AnimConfig.Style and AnimConfig.Style ~= "Auto" then
-		chosenStyle = AnimConfig.Style
-	end
-	local style = (defaultStyle == Enum.EasingStyle.Linear)
-		and Enum.EasingStyle.Linear
-		or resolveEasingStyle(chosenStyle, defaultStyle)
-	local direction = resolveEasingDirection((catCfg and catCfg.Direction) or AnimConfig.Direction, defaultDirection)
-
-	return {
-		Active = active and duration > 0,
-		Duration = active and duration or 0,
-		Style = style,
-		Direction = direction,
-		Intensity = intensity,
-		Effect = effectName,
-		Fade = flags.Fade,
-		Slide = flags.Slide,
-		Scale = flags.Scale,
-		Blur = flags.Blur,
-		ReduceMotion = false,
-	}
-end
-
--- ===================================================================
--- Blur de transicao (seguro, sob demanda e sem vazamentos)
--- ===================================================================
-local BlurInstance = nil
-local BlurPulseToken = 0
-local BlurModalActive = false
-
-local function ensureTransitionBlur()
-	if BlurInstance and BlurInstance.Parent then return BlurInstance end
-	local ok, lighting = pcall(function() return game:GetService("Lighting") end)
-	if not ok or not lighting then return nil end
-	local existing = lighting:FindFirstChild("AetherUI_TransitionBlur")
-	if existing and existing:IsA("BlurEffect") then
-		BlurInstance = existing
-		return BlurInstance
-	end
-	local okNew, blur = pcall(function()
-		return create("BlurEffect", {
-			Name = "AetherUI_TransitionBlur",
-			Size = 0, Enabled = false, Parent = lighting,
-		})
-	end)
-	if okNew and blur then
-		BlurInstance = blur
-		return blur
-	end
-	return nil
-end
-
-local function clearTransitionBlur(immediate)
-	BlurPulseToken = BlurPulseToken + 1
-	BlurModalActive = false
-	local blur = BlurInstance
-	if not blur or not blur.Parent then return end
-	if immediate or State.LowPerformance then
-		blur.Size = 0
-		blur.Enabled = false
-	else
-		local t = TweenService:Create(blur, TweenInfo.new(0.16, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { Size = 0 })
-		t:Play()
-		task.delay(0.18, function()
-			if not BlurModalActive and BlurInstance == blur and blur.Parent and blur.Size <= 0.1 then
-				blur.Enabled = false
-			end
-		end)
-	end
-end
-
-local function triggerBlurPulse(peakSize, duration)
-	if State.LowPerformance or not AnimConfig.Enabled or AnimConfig.ReduceMotion then return end
-	peakSize = math.clamp(tonumber(peakSize) or 0, 0, 24)
-	if peakSize <= 0.2 then return end
-	local blur = ensureTransitionBlur()
-	if not blur then return end
-	BlurPulseToken = BlurPulseToken + 1
-	local token = BlurPulseToken
-	local dur = math.clamp(tonumber(duration) or Anim.Normal, 0.1, 1.2)
-	local half = dur * 0.45
-	blur.Enabled = true
-	blur.Size = 0
-	local inTween = TweenService:Create(blur, TweenInfo.new(half, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = peakSize })
-	inTween:Play()
-	task.delay(half, function()
-		if BlurPulseToken ~= token or not blur.Parent or BlurModalActive then return end
-		local outTween = TweenService:Create(blur, TweenInfo.new(dur - half, Enum.EasingStyle.Sine, Enum.EasingDirection.Out), { Size = 0 })
-		outTween:Play()
-		task.delay((dur - half) + 0.03, function()
-			if BlurPulseToken == token and not BlurModalActive and blur.Parent then
-				blur.Enabled = false
-			end
-		end)
-	end)
-end
-
-local function setModalBlur(enabled, targetSize, duration)
-	BlurModalActive = enabled == true
-	local blur = BlurInstance
-	if enabled then
-		if State.LowPerformance or not AnimConfig.Enabled or AnimConfig.ReduceMotion then return end
-		blur = ensureTransitionBlur()
-		if not blur then return end
-		BlurPulseToken = BlurPulseToken + 1
-		blur.Enabled = true
-		TweenService:Create(blur, TweenInfo.new(duration or Anim.Normal, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
-			Size = math.clamp(targetSize or 10, 0, 24),
-		}):Play()
-	else
-		clearTransitionBlur(false)
-	end
-end
-
--- ===================================================================
--- Animador central
+-- Animador central (padroes internos fixos, sem opcoes extras)
 --  * TweenInfo em cache (sem alocar a cada chamada)
 --  * no maximo 1 tween ativo por propriedade de cada objeto; tweens
 --	concorrentes sao mesclados (as propriedades nao sobrescritas terminam
 --	normalmente, nada fica pela metade)
 --  * pedido identico ao que ja esta rodando / ja no valor final = no-op
---  * objeto invisivel (ou janela minimizada) = atribuicao direta, sem tween
+--  * objeto invisivel (ou LowPerformance) = atribuicao direta, sem tween
 -- Nenhuma logica critica deve depender de Tween.Completed.
 -- ===================================================================
 local STUB_TWEEN = {}
@@ -574,18 +251,16 @@ local function cancelTweensUnder(root)
 	end
 end
 
-local function tween(object, duration, properties, style, direction, category)
-	local resolved = resolveAnim(category, duration, style, direction)
-	if not resolved.Active or not duration or duration <= 0 or not isRendered(object) then
+local function tween(object, duration, properties, style, direction)
+	if State.LowPerformance or not duration or duration <= 0 or not isRendered(object) then
 		local leftovers = takeConflicts(object, properties)
 		if leftovers then for key, value in pairs(leftovers) do object[key] = value end end
 		for key, value in pairs(properties) do object[key] = value end
 		return STUB_TWEEN
 	end
 
-	duration = resolved.Duration
-	style = resolved.Style
-	direction = resolved.Direction
+	style = style or Enum.EasingStyle.Quint
+	direction = direction or Enum.EasingDirection.Out
 
 	-- Pedido redundante: ja esta indo / ja esta no valor final.
 	local records = ActiveTweens[object]
@@ -616,23 +291,32 @@ local function tween(object, duration, properties, style, direction, category)
 	return t
 end
 
-local function setProps(object, properties, animate, duration, style, direction, category)
-	if animate then tween(object, duration or Anim.Fast, properties, style, direction, category)
-	else for key, value in pairs(properties) do object[key] = value end end
+local function setProps(object, properties, animate, duration, style, direction)
+	if animate and not State.LowPerformance then
+		tween(object, duration or Anim.Fast, properties, style, direction)
+	else
+		local leftovers = takeConflicts(object, properties)
+		if leftovers then for key, value in pairs(leftovers) do object[key] = value end end
+		for key, value in pairs(properties) do object[key] = value end
+	end
 end
 
 -- ===================================================================
--- Performance Monitor (FPS, Uptime, Elementos Ativos, Tweens, Memoria)
--- Heartbeat compartilhado e sob demanda (desliga quando nenhum HUD ou
--- aba Interface visivel precisa atualizar).
+-- Telemetria (FPS, Ping, Uptime, Historico) & Smart Performance (Anti-Lag)
 -- ===================================================================
 local Notifications = { Gui = nil, Holder = nil, Layout = nil, Active = {}, Counter = 0 }
 
 local PerfMonitor = {
-	Interval = 0.4,
+	Interval = 0.35,
+	HistoryMax = 32,
+	History = {},
 	Stats = {
 		FPS = 60,
+		MinFPS = 60,
+		MaxFPS = 60,
+		AvgFPS = 60,
 		FrameTimeMs = 16.7,
+		PingMs = -1,
 		Uptime = 0,
 		ActiveElements = 0,
 		GuiObjects = 0,
@@ -671,11 +355,602 @@ local function readMemoryMb()
 	return 0
 end
 
-local function samplePerfSnapshot(fps, frameMs)
+local function readPingMs()
+	local okStats, statsService = pcall(function() return game:GetService("Stats") end)
+	if okStats and statsService then
+		local okNet, rawVal = pcall(function()
+			local net = statsService:FindFirstChild("Network")
+			local serverItems = net and net:FindFirstChild("ServerStatsItem")
+			local dataPing = serverItems and serverItems:FindFirstChild("Data Ping")
+			if dataPing then return dataPing:GetValue() end
+			return nil
+		end)
+		if okNet and typeof(rawVal) == "number" and rawVal >= 0 then
+			return math.max(0, math.floor(rawVal + 0.5))
+		end
+	end
+	local player = Players.LocalPlayer
+	if player then
+		local okPing, netPing = pcall(function() return player:GetNetworkPing() end)
+		if okPing and typeof(netPing) == "number" and netPing >= 0 then
+			return math.max(0, math.floor(netPing * 1000 + 0.5))
+		end
+	end
+	return -1
+end
+
+local function pushFpsHistory(fps)
+	local hist = PerfMonitor.History
+	table.insert(hist, fps)
+	while #hist > PerfMonitor.HistoryMax do
+		table.remove(hist, 1)
+	end
+	local minV, maxV, sumV = fps, fps, 0
+	for _, v in ipairs(hist) do
+		if v < minV then minV = v end
+		if v > maxV then maxV = v end
+		sumV = sumV + v
+	end
+	PerfMonitor.Stats.MinFPS = minV
+	PerfMonitor.Stats.MaxFPS = maxV
+	PerfMonitor.Stats.AvgFPS = math.floor((sumV / math.max(#hist, 1)) + 0.5)
+end
+
+-- ===================================================================
+-- Smart Performance (Anti-Lag avancado baseado em distancia & LOD)
+-- Restricoes obrigatorias respeitadas integralmente:
+--   * NUNCA remove, destroi, oculta ou desativa particulas, Trails,
+--     Beams, luzes, sombras, texturas, decals ou efeitos especiais.
+--   * NUNCA modifica objetos proximos, personagens, ferramentas,
+--     colisoes, fisica, objetos interativos ou mecanicas do jogo.
+--   * Local, reversivel e sem alteracoes permanentes no mapa.
+-- ===================================================================
+local SmartPerf = {
+	Enabled = false,
+	Cache = {},
+	EntryMap = {},
+	Modified = {},
+	Cursor = 1,
+	ScanQueue = nil,
+	ScanIndex = 1,
+	ScanDone = true,
+	Conns = {},
+	HeartbeatConn = nil,
+	StepAccum = 0,
+	LastPlayerPos = nil,
+	LastCamPos = nil,
+	SmoothFps = 60,
+	Stress = 0,
+	NearRadius = 130,
+	FarRadius = 290,
+	Stats = {
+		Enabled = false,
+		Profile = "Inativo",
+		NearCount = 0,
+		MidCount = 0,
+		FarCount = 0,
+		OptimizedCount = 0,
+		CachedCount = 0,
+		NearRadius = 130,
+		FarRadius = 290,
+	},
+}
+
+local SMART_HYSTERESIS = 18
+local SMART_MIN_DWELL = 1.25
+local SMART_STEP_BUDGET = 0.0014
+
+local SmartProceduralMaterials = {
+	[Enum.Material.Brick] = true,
+	[Enum.Material.Cobblestone] = true,
+	[Enum.Material.Concrete] = true,
+	[Enum.Material.CorrodedMetal] = true,
+	[Enum.Material.DiamondPlate] = true,
+	[Enum.Material.Fabric] = true,
+	[Enum.Material.Foil] = true,
+	[Enum.Material.Granite] = true,
+	[Enum.Material.Grass] = true,
+	[Enum.Material.Ice] = true,
+	[Enum.Material.Marble] = true,
+	[Enum.Material.Metal] = true,
+	[Enum.Material.Pebble] = true,
+	[Enum.Material.Sand] = true,
+	[Enum.Material.Slate] = true,
+	[Enum.Material.Wood] = true,
+	[Enum.Material.WoodPlanks] = true,
+}
+pcall(function()
+	for _, name in ipairs({
+		"Asphalt", "Basalt", "Carpet", "CrackedLava", "Glacier", "Ground",
+		"LeafyGrass", "Limestone", "Mud", "Pavement", "Plaster",
+		"Rock", "RoofShingles", "Salt", "Sandstone", "Snow",
+	}) do
+		local mat = Enum.Material[name]
+		if mat then SmartProceduralMaterials[mat] = true end
+	end
+end)
+
+local function isCharacterOrTool(inst)
+	local node = inst
+	while node and node ~= workspace do
+		if node:IsA("Tool") or node:IsA("HopperBin") or node:IsA("Accessory") then
+			return true
+		end
+		if node:IsA("Model") then
+			if node:FindFirstChildOfClass("Humanoid") or node:FindFirstChildOfClass("AnimationController") then
+				return true
+			end
+			for _, plr in ipairs(Players:GetPlayers()) do
+				if plr.Character == node then return true end
+			end
+		end
+		node = node.Parent
+	end
+	return false
+end
+
+local function hasInteractiveOrSurfaceChild(inst)
+	for _, child in ipairs(inst:GetChildren()) do
+		if child:IsA("ProximityPrompt")
+			or child:IsA("ClickDetector")
+			or child:IsA("DragDetector")
+			or child:IsA("TouchTransmitter")
+			or child:IsA("Dialog")
+			or child:IsA("Seat")
+			or child:IsA("VehicleSeat")
+			or child:IsA("SurfaceAppearance")
+			or child:IsA("Texture")
+			or child:IsA("Decal") then
+			return true
+		end
+	end
+	return false
+end
+
+local function hasInteractiveDescendant(inst)
+	for _, desc in ipairs(inst:GetDescendants()) do
+		if desc:IsA("ProximityPrompt")
+			or desc:IsA("ClickDetector")
+			or desc:IsA("DragDetector")
+			or desc:IsA("TouchTransmitter")
+			or desc:IsA("Seat")
+			or desc:IsA("VehicleSeat")
+			or desc:IsA("Humanoid")
+			or desc:IsA("AnimationController") then
+			return true
+		end
+	end
+	return false
+end
+
+local function classifySmartTarget(inst)
+	if not inst or not inst.Parent then return nil end
+	if SmartPerf.EntryMap[inst] then return nil end
+	if inst:IsA("Terrain") or inst:IsA("Camera") then return nil end
+
+	if inst:IsA("SurfaceGui") then
+		local parent = inst.Adornee or inst.Parent
+		if not parent or not parent:IsA("BasePart") or isCharacterOrTool(parent) then return nil end
+		local okMode, mode = pcall(function() return inst.SizingMode end)
+		if okMode and mode ~= Enum.SurfaceGuiSizingMode.PixelsPerStud then return nil end
+		return {
+			Inst = inst, Kind = "SurfaceGui", AnchorPart = parent,
+			Pos = parent.Position,
+			Radius = math.min(parent.Size.Magnitude * 0.5, 90),
+			Tier = 0, LastSwitch = 0, Orig = nil,
+		}
+	end
+
+	if inst:IsA("Model") then
+		if isCharacterOrTool(inst) or hasInteractiveDescendant(inst) then return nil end
+		local okBox, cf, sz = pcall(function() return inst:GetBoundingBox() end)
+		if not okBox or typeof(cf) ~= "CFrame" then return nil end
+		return {
+			Inst = inst, Kind = "Model",
+			Pos = cf.Position,
+			Radius = math.min(sz.Magnitude * 0.5, 160),
+			Tier = 0, LastSwitch = 0, Orig = nil,
+		}
+	end
+
+	if inst:IsA("BasePart") then
+		if inst:IsA("Seat") or inst:IsA("VehicleSeat") or inst:IsA("SkateboardPlatform") then return nil end
+		if isCharacterOrTool(inst) or hasInteractiveOrSurfaceChild(inst) then return nil end
+		local kind = inst:IsA("MeshPart") and "Mesh" or "Part"
+		return {
+			Inst = inst, Kind = kind,
+			Pos = inst.Position,
+			Radius = math.min(inst.Size.Magnitude * 0.5, 120),
+			Tier = 0, LastSwitch = 0, Orig = nil,
+		}
+	end
+
+	return nil
+end
+
+local function captureSmartOrig(entry)
+	if entry.Orig then return entry.Orig end
+	local inst = entry.Inst
+	local orig = {}
+	if entry.Kind == "Mesh" or entry.Kind == "Part" then
+		orig.Reflectance = inst.Reflectance
+		orig.Material = inst.Material
+		if entry.Kind == "Mesh" then
+			local okRf, rf = pcall(function() return inst.RenderFidelity end)
+			if okRf then orig.RenderFidelity = rf end
+		end
+	elseif entry.Kind == "Model" then
+		local okLod, lod = pcall(function() return inst.LevelOfDetail end)
+		if okLod then orig.LevelOfDetail = lod end
+	elseif entry.Kind == "SurfaceGui" then
+		local okPps, pps = pcall(function() return inst.PixelsPerStud end)
+		if okPps then orig.PixelsPerStud = pps end
+	end
+	entry.Orig = orig
+	return orig
+end
+
+local function restoreSmartEntry(entry)
+	local inst = entry.Inst
+	local orig = entry.Orig
+	if not orig or not inst or not inst.Parent then
+		SmartPerf.Modified[inst] = nil
+		entry.Tier = 0
+		return
+	end
+	if entry.Kind == "Mesh" or entry.Kind == "Part" then
+		pcall(function()
+			if orig.Reflectance ~= nil and inst.Reflectance ~= orig.Reflectance then
+				inst.Reflectance = orig.Reflectance
+			end
+			if orig.Material ~= nil and inst.Material ~= orig.Material then
+				inst.Material = orig.Material
+			end
+			if orig.RenderFidelity ~= nil and inst.RenderFidelity ~= orig.RenderFidelity then
+				inst.RenderFidelity = orig.RenderFidelity
+			end
+		end)
+	elseif entry.Kind == "Model" then
+		if orig.LevelOfDetail ~= nil then
+			pcall(function()
+				if inst.LevelOfDetail ~= orig.LevelOfDetail then
+					inst.LevelOfDetail = orig.LevelOfDetail
+				end
+			end)
+		end
+	elseif entry.Kind == "SurfaceGui" then
+		if orig.PixelsPerStud ~= nil then
+			pcall(function()
+				if inst.PixelsPerStud ~= orig.PixelsPerStud then
+					inst.PixelsPerStud = orig.PixelsPerStud
+				end
+			end)
+		end
+	end
+	SmartPerf.Modified[inst] = nil
+	entry.Tier = 0
+end
+
+local function applySmartTier(entry, newTier)
+	if newTier == 0 then
+		if SmartPerf.Modified[entry.Inst] then
+			restoreSmartEntry(entry)
+		else
+			entry.Tier = 0
+		end
+		return
+	end
+
+	local inst = entry.Inst
+	if not inst or not inst.Parent then return end
+	local orig = captureSmartOrig(entry)
+	local changed = false
+
+	if entry.Kind == "Mesh" or entry.Kind == "Part" then
+		local targetReflect = orig.Reflectance or 0
+		if targetReflect > 0.05 then
+			targetReflect = (newTier == 1) and (targetReflect * 0.3) or 0
+		end
+		if math.abs(inst.Reflectance - targetReflect) > 0.01 then
+			local ok = pcall(function() inst.Reflectance = targetReflect end)
+			if ok then changed = true end
+		end
+
+		local origMat = orig.Material
+		local targetMat = origMat
+		if origMat == Enum.Material.Glass then
+			targetMat = Enum.Material.SmoothPlastic
+		elseif newTier == 2 and origMat and SmartProceduralMaterials[origMat] then
+			targetMat = Enum.Material.SmoothPlastic
+		end
+		if targetMat and inst.Material ~= targetMat then
+			local ok = pcall(function() inst.Material = targetMat end)
+			if ok then changed = true end
+		end
+
+		if entry.Kind == "Mesh" and orig.RenderFidelity ~= nil then
+			local targetRf = (newTier == 2) and Enum.RenderFidelity.Performance or Enum.RenderFidelity.Automatic
+			if inst.RenderFidelity ~= targetRf then
+				local ok = pcall(function() inst.RenderFidelity = targetRf end)
+				if ok then changed = true end
+			end
+		end
+	elseif entry.Kind == "Model" and orig.LevelOfDetail ~= nil then
+		local targetLod = Enum.ModelLevelOfDetail.Automatic
+		if newTier == 2 then
+			local okSm, sm = pcall(function() return Enum.ModelLevelOfDetail.StreamingMesh end)
+			if okSm and sm then targetLod = sm end
+		end
+		if inst.LevelOfDetail ~= targetLod then
+			local ok = pcall(function() inst.LevelOfDetail = targetLod end)
+			if ok then changed = true end
+		end
+	elseif entry.Kind == "SurfaceGui" and orig.PixelsPerStud ~= nil then
+		local cap = (newTier == 2) and 10 or 18
+		local targetPps = math.min(orig.PixelsPerStud, cap)
+		if math.abs(inst.PixelsPerStud - targetPps) > 0.5 then
+			local ok = pcall(function() inst.PixelsPerStud = targetPps end)
+			if ok then changed = true end
+		end
+	end
+
+	entry.Tier = newTier
+	if changed then
+		SmartPerf.Modified[inst] = entry
+	end
+end
+
+local function refreshSmartCacheEntry(inst)
+	local entry = classifySmartTarget(inst)
+	if entry then
+		SmartPerf.EntryMap[inst] = entry
+		table.insert(SmartPerf.Cache, entry)
+	end
+end
+
+local function removeSmartEntry(inst)
+	local entry = SmartPerf.EntryMap[inst]
+	if not entry then return end
+	SmartPerf.EntryMap[inst] = nil
+	SmartPerf.Modified[inst] = nil
+	entry.Dead = true
+end
+
+local function getReferencePoints()
+	local player = Players.LocalPlayer
+	local playerPos = nil
+	local char = player and player.Character
+	if char then
+		local rootPart = char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart
+		if rootPart and rootPart:IsA("BasePart") then
+			playerPos = rootPart.Position
+		end
+	end
+	local cam = workspace.CurrentCamera
+	local camPos = cam and cam.CFrame.Position or nil
+	return playerPos, camPos
+end
+
+local function stepSmartPerformance(dt)
+	if not SmartPerf.Enabled then return end
+
+	if dt > 0 and dt < 0.5 then
+		local instFps = 1 / math.max(dt, 0.001)
+		SmartPerf.SmoothFps = SmartPerf.SmoothFps * 0.9 + instFps * 0.1
+	end
+
+	local rawStress = math.clamp((54 - SmartPerf.SmoothFps) / 26, 0, 1)
+	SmartPerf.Stress = SmartPerf.Stress * 0.85 + rawStress * 0.15
+	SmartPerf.NearRadius = math.floor(135 - SmartPerf.Stress * 48 + 0.5)
+	SmartPerf.FarRadius = math.floor(295 - SmartPerf.Stress * 95 + 0.5)
+	SmartPerf.Stats.NearRadius = SmartPerf.NearRadius
+	SmartPerf.Stats.FarRadius = SmartPerf.FarRadius
+	SmartPerf.Stats.Profile = SmartPerf.Stress >= 0.65 and "Agressivo"
+		or (SmartPerf.Stress >= 0.25 and "Equilibrado" or "Leve")
+
+	local startClock = os.clock()
+
+	-- Indexacao inicial incremental em lotes pequenos para nao gerar stutter
+	if not SmartPerf.ScanDone and SmartPerf.ScanQueue then
+		local queue = SmartPerf.ScanQueue
+		local total = #queue
+		local idx = SmartPerf.ScanIndex
+		local processed = 0
+		while idx <= total and processed < 220 do
+			refreshSmartCacheEntry(queue[idx])
+			idx = idx + 1
+			processed = processed + 1
+			if processed % 40 == 0 and (os.clock() - startClock) > SMART_STEP_BUDGET then
+				break
+			end
+		end
+		SmartPerf.ScanIndex = idx
+		if idx > total then
+			SmartPerf.ScanDone = true
+			SmartPerf.ScanQueue = nil
+		end
+	end
+
+	SmartPerf.StepAccum = SmartPerf.StepAccum + dt
+	local playerPos, camPos = getReferencePoints()
+	local moved = false
+	if playerPos and (not SmartPerf.LastPlayerPos or (playerPos - SmartPerf.LastPlayerPos).Magnitude >= 4) then
+		moved = true
+		SmartPerf.LastPlayerPos = playerPos
+	end
+	if camPos and (not SmartPerf.LastCamPos or (camPos - SmartPerf.LastCamPos).Magnitude >= 4) then
+		moved = true
+		SmartPerf.LastCamPos = camPos
+	end
+	local interval = (moved or SmartPerf.Stress >= 0.3) and 0.14 or 0.28
+	if SmartPerf.StepAccum < interval then return end
+	SmartPerf.StepAccum = 0
+
+	if not playerPos and not camPos then return end
+	local cache = SmartPerf.Cache
+	local count = #cache
+	if count == 0 then
+		SmartPerf.Stats.CachedCount = 0
+		SmartPerf.Stats.NearCount = 0
+		SmartPerf.Stats.MidCount = 0
+		SmartPerf.Stats.FarCount = 0
+		SmartPerf.Stats.OptimizedCount = 0
+		return
+	end
+
+	local now = os.clock()
+	local nearR, farR = SmartPerf.NearRadius, SmartPerf.FarRadius
+	local batchLimit = math.min(count, 180)
+	local cursor = SmartPerf.Cursor
+	if cursor > count then cursor = 1 end
+
+	local checks = 0
+	while checks < batchLimit and #cache > 0 do
+		if cursor > #cache then cursor = 1 end
+		local entry = cache[cursor]
+		if not entry or entry.Dead or not entry.Inst or not entry.Inst.Parent then
+			if entry and entry.Inst then
+				SmartPerf.EntryMap[entry.Inst] = nil
+				SmartPerf.Modified[entry.Inst] = nil
+			end
+			cache[cursor] = cache[#cache]
+			table.remove(cache)
+		else
+			if entry.Kind == "SurfaceGui" then
+				local p = entry.AnchorPart
+				if p and p.Parent then entry.Pos = p.Position end
+			elseif entry.Kind == "Part" or entry.Kind == "Mesh" then
+				entry.Pos = entry.Inst.Position
+			end
+
+			local pos = entry.Pos
+			local d1 = playerPos and (pos - playerPos).Magnitude or math.huge
+			local d2 = camPos and (pos - camPos).Magnitude or math.huge
+			local rawDist = math.min(d1, d2)
+			local effDist = math.max(0, rawDist - entry.Radius)
+
+			local curTier = entry.Tier or 0
+			local targetTier = curTier
+			if curTier == 0 then
+				if effDist > farR + SMART_HYSTERESIS then
+					targetTier = 2
+				elseif effDist > nearR + SMART_HYSTERESIS then
+					targetTier = 1
+				end
+			elseif curTier == 1 then
+				if effDist < nearR - SMART_HYSTERESIS then
+					targetTier = 0
+				elseif effDist > farR + SMART_HYSTERESIS then
+					targetTier = 2
+				end
+			else
+				if effDist < nearR - SMART_HYSTERESIS then
+					targetTier = 0
+				elseif effDist < farR - SMART_HYSTERESIS then
+					targetTier = 1
+				end
+			end
+
+			if targetTier ~= curTier and (now - (entry.LastSwitch or 0) >= SMART_MIN_DWELL or targetTier == 0) then
+				applySmartTier(entry, targetTier)
+				entry.LastSwitch = now
+			end
+			cursor = cursor + 1
+		end
+		checks = checks + 1
+		if checks % 25 == 0 and (os.clock() - startClock) > SMART_STEP_BUDGET then
+			break
+		end
+	end
+	SmartPerf.Cursor = cursor
+
+	-- Contadores rapidos sem iteracao completa pesada (amostra ou contagem direta leve)
+	local nearC, midC, farC, optC = 0, 0, 0, 0
+	for _, entry in ipairs(cache) do
+		if not entry.Dead then
+			if entry.Tier == 0 then nearC = nearC + 1
+			elseif entry.Tier == 1 then midC = midC + 1
+			else farC = farC + 1 end
+		end
+	end
+	for _ in pairs(SmartPerf.Modified) do optC = optC + 1 end
+	SmartPerf.Stats.CachedCount = #cache
+	SmartPerf.Stats.NearCount = nearC
+	SmartPerf.Stats.MidCount = midC
+	SmartPerf.Stats.FarCount = farC
+	SmartPerf.Stats.OptimizedCount = optC
+end
+
+local function enableSmartPerf()
+	if SmartPerf.Enabled then return end
+	SmartPerf.Enabled = true
+	SmartPerf.Stats.Enabled = true
+	SmartPerf.Stats.Profile = "Equilibrado"
+	SmartPerf.StepAccum = 0.3
+	SmartPerf.LastPlayerPos = nil
+	SmartPerf.LastCamPos = nil
+	local okDesc, desc = pcall(function() return workspace:GetDescendants() end)
+	if okDesc and typeof(desc) == "table" then
+		SmartPerf.ScanQueue = desc
+		SmartPerf.ScanIndex = 1
+		SmartPerf.ScanDone = #desc == 0
+	else
+		SmartPerf.ScanQueue = nil
+		SmartPerf.ScanDone = true
+	end
+	table.insert(SmartPerf.Conns, workspace.DescendantAdded:Connect(function(inst)
+		if SmartPerf.Enabled then refreshSmartCacheEntry(inst) end
+	end))
+	table.insert(SmartPerf.Conns, workspace.DescendantRemoving:Connect(function(inst)
+		removeSmartEntry(inst)
+	end))
+	SmartPerf.HeartbeatConn = RunService.Heartbeat:Connect(stepSmartPerformance)
+end
+
+local function disableSmartPerf()
+	if not SmartPerf.Enabled then return end
+	SmartPerf.Enabled = false
+	if SmartPerf.HeartbeatConn then
+		SmartPerf.HeartbeatConn:Disconnect()
+		SmartPerf.HeartbeatConn = nil
+	end
+	for _, conn in ipairs(SmartPerf.Conns) do
+		conn:Disconnect()
+	end
+	table.clear(SmartPerf.Conns)
+
+	local toRestore = {}
+	for _, entry in pairs(SmartPerf.Modified) do
+		table.insert(toRestore, entry)
+	end
+	for _, entry in ipairs(toRestore) do
+		restoreSmartEntry(entry)
+	end
+	table.clear(SmartPerf.Cache)
+	table.clear(SmartPerf.EntryMap)
+	table.clear(SmartPerf.Modified)
+	SmartPerf.ScanQueue = nil
+	SmartPerf.ScanIndex = 1
+	SmartPerf.ScanDone = true
+	SmartPerf.Cursor = 1
+	SmartPerf.Stats.Enabled = false
+	SmartPerf.Stats.Profile = "Inativo"
+	SmartPerf.Stats.NearCount = 0
+	SmartPerf.Stats.MidCount = 0
+	SmartPerf.Stats.FarCount = 0
+	SmartPerf.Stats.OptimizedCount = 0
+	SmartPerf.Stats.CachedCount = 0
+end
+
+local function samplePerfSnapshot(fps, frameMs, pushHistory)
 	local st = PerfMonitor.Stats
-	if fps then st.FPS = fps end
+	if fps then
+		st.FPS = fps
+		if pushHistory then pushFpsHistory(fps) end
+	end
 	if frameMs then st.FrameTimeMs = frameMs end
 	st.Uptime = os.clock() - LibraryStartClock
+	st.PingMs = readPingMs()
 
 	local elemCount, connCount, guiCount, winCount = 0, 0, 0, 0
 	for _, win in ipairs(Windows) do
@@ -725,14 +1000,14 @@ local function refreshPerfSubscription()
 	if anyNeed then
 		if PerfMonitor.Conn then return end
 		local frames, accum, emaFps = 0, 0, 60
-		samplePerfSnapshot(nil, nil)
+		samplePerfSnapshot(nil, nil, false)
 		for win in pairs(PerfMonitor.Subscribers) do
-			if win._state ~= "Destroyed" then win:_updatePerfViews() end
+			if win._state ~= "Destroyed" and win:_needsPerfUpdates() then win:_updatePerfViews() end
 		end
 		PerfMonitor.Conn = RunService.Heartbeat:Connect(function(dt)
 			frames = frames + 1
 			accum = accum + dt
-			local interval = math.clamp(tonumber(PerfMonitor.Interval) or 0.4, 0.15, 2)
+			local interval = math.clamp(tonumber(PerfMonitor.Interval) or 0.35, 0.15, 2)
 			if accum < interval then return end
 			local rawFps = frames / math.max(accum, 0.001)
 			emaFps = emaFps * 0.35 + rawFps * 0.65
@@ -740,7 +1015,7 @@ local function refreshPerfSubscription()
 			local frameMs = math.floor((accum / math.max(frames, 1)) * 10000 + 0.5) / 10
 			frames = 0
 			accum = 0
-			samplePerfSnapshot(fps, frameMs)
+			samplePerfSnapshot(fps, frameMs, true)
 			for win in pairs(PerfMonitor.Subscribers) do
 				if win._state == "Destroyed" then
 					PerfMonitor.Subscribers[win] = nil
