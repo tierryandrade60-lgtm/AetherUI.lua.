@@ -1056,6 +1056,20 @@ local function clampBallPosition(position, diameter)
 	)
 end
 
+local function clampHudPosition(position, sizeVec)
+	local viewport = getViewport()
+	local insetTop = getGuiInset().Y
+	local pad = 6
+	local w = sizeVec and sizeVec.X or 210
+	local h = sizeVec and sizeVec.Y or 96
+	local minY = insetTop + pad
+	local maxX = math.max(pad, viewport.X - w - pad)
+	local maxY = math.max(minY, viewport.Y - h - pad)
+	local x = position.X.Scale * viewport.X + position.X.Offset
+	local y = position.Y.Scale * viewport.Y + position.Y.Offset
+	return UDim2.fromOffset(math.clamp(x, pad, maxX), math.clamp(y, minY, maxY))
+end
+
 local function makeDraggable(handle, target, connections, options)
 	options = options or {}
 	local dragging, moved, activeInput = false, false, nil
@@ -5219,6 +5233,185 @@ function Window:_buildSettings()
 			AetherUI.SetLowPerformance(value)
 		end,
 	})
+
+	tab:AddSection({ Text = "Animacoes & Transicoes", Icon = "sparkles" })
+	local selectedCatKey = "Window"
+	local catLabelToKey = {}
+	local catOptions = {}
+	for _, key in ipairs(AnimCategoryOrder) do
+		local lbl = AnimCategoryLabels[key] or key
+		catLabelToKey[lbl] = key
+		table.insert(catOptions, lbl)
+	end
+
+	local toggleAnimEnabled = tab:AddToggle({
+		Name = "Animacoes ativas", Icon = "play", Default = AnimConfig.Enabled,
+		Callback = function(value)
+			if self._syncing then return end
+			AetherUI.SetAnimationsEnabled(value)
+		end,
+	})
+	local toggleReduceMotion = tab:AddToggle({
+		Name = "Reduzir movimento", Icon = "eyeoff", Default = AnimConfig.ReduceMotion,
+		Callback = function(value)
+			if self._syncing then return end
+			AetherUI.SetReduceMotion(value)
+		end,
+	})
+	local ddAnimEffect = tab:AddDropdown({
+		Name = "Efeito global", Icon = "layers",
+		Options = EffectOptions, Default = AnimConfig.Effect,
+		Callback = function(value)
+			if self._syncing or not value then return end
+			AetherUI.SetAnimationConfig({ Effect = value })
+		end,
+	})
+	local ddAnimStyle = tab:AddDropdown({
+		Name = "Estilo de easing", Icon = "sliders",
+		Options = EasingStyleOptions, Default = AnimConfig.Style,
+		Callback = function(value)
+			if self._syncing or not value then return end
+			AetherUI.SetAnimationConfig({ Style = value })
+		end,
+	})
+	local sliderAnimSpeed = tab:AddSlider({
+		Name = "Velocidade global", Icon = "gauge",
+		Min = 0.5, Max = 2.5, Step = 0.05, Suffix = "x",
+		Default = AnimConfig.Speed,
+		Callback = function(value)
+			if self._syncing then return end
+			AetherUI.SetAnimationConfig({ Speed = value })
+		end,
+	})
+	local sliderAnimIntensity = tab:AddSlider({
+		Name = "Intensidade global", Icon = "sun",
+		Min = 0, Max = 2, Step = 0.05, Suffix = "x",
+		Default = AnimConfig.Intensity,
+		Callback = function(value)
+			if self._syncing then return end
+			AetherUI.SetAnimationConfig({ Intensity = value })
+		end,
+	})
+
+	local ddCatSelect, toggleCatEnabled, ddCatEffect, sliderCatSpeed, sliderCatIntensity
+	local function syncCategoryControls()
+		local cat = AnimConfig.Categories[selectedCatKey]
+		if not cat then return end
+		local wasSyncing = self._syncing
+		self._syncing = true
+		if toggleCatEnabled then toggleCatEnabled:Set(cat.Enabled == true, true) end
+		if ddCatEffect then ddCatEffect:Set(cat.Effect, true) end
+		if sliderCatSpeed then sliderCatSpeed:Set(cat.Speed, true) end
+		if sliderCatIntensity then sliderCatIntensity:Set(cat.Intensity, true) end
+		self._syncing = wasSyncing
+	end
+
+	ddCatSelect = tab:AddDropdown({
+		Name = "Personalizar categoria", Icon = "grid",
+		Options = catOptions, Default = AnimCategoryLabels[selectedCatKey],
+		Callback = function(value)
+			if self._syncing or not value then return end
+			local resolved = catLabelToKey[value] or resolveCategoryKey(value)
+			if resolved then
+				selectedCatKey = resolved
+				syncCategoryControls()
+			end
+		end,
+	})
+	toggleCatEnabled = tab:AddToggle({
+		Name = "Categoria ativa", Icon = "check",
+		Default = AnimConfig.Categories[selectedCatKey].Enabled,
+		Callback = function(value)
+			if self._syncing then return end
+			AetherUI.SetCategoryAnimation(selectedCatKey, { Enabled = value })
+		end,
+	})
+	ddCatEffect = tab:AddDropdown({
+		Name = "Efeito da categoria", Icon = "layers",
+		Options = EffectOptions, Default = AnimConfig.Categories[selectedCatKey].Effect,
+		Callback = function(value)
+			if self._syncing or not value then return end
+			AetherUI.SetCategoryAnimation(selectedCatKey, { Effect = value })
+		end,
+	})
+	sliderCatSpeed = tab:AddSlider({
+		Name = "Velocidade da categoria", Icon = "gauge",
+		Min = 0.5, Max = 2.5, Step = 0.05, Suffix = "x",
+		Default = AnimConfig.Categories[selectedCatKey].Speed,
+		Callback = function(value)
+			if self._syncing then return end
+			AetherUI.SetCategoryAnimation(selectedCatKey, { Speed = value })
+		end,
+	})
+	sliderCatIntensity = tab:AddSlider({
+		Name = "Intensidade da categoria", Icon = "sun",
+		Min = 0, Max = 2, Step = 0.05, Suffix = "x",
+		Default = AnimConfig.Categories[selectedCatKey].Intensity,
+		Callback = function(value)
+			if self._syncing then return end
+			AetherUI.SetCategoryAnimation(selectedCatKey, { Intensity = value })
+		end,
+	})
+	tab:AddButton({
+		Name = "Restaurar animacoes padrao", Icon = "refresh",
+		Callback = function()
+			AetherUI.ResetAnimations()
+			AetherUI.Notify({ Title = "Animacoes restauradas", Content = "Configuracoes de transicao redefinidas.", Type = "info", Duration = 2.4 })
+		end,
+	})
+
+	tab:AddSection({ Text = "Performance Monitor", Icon = "activity" })
+	local perfMainLabel = tab:AddLabel({
+		Text = "FPS: 60 (16.7 ms)  •  Uptime: 00:00",
+		Icon = "activity",
+	})
+	local perfStatsLabel = tab:AddLabel({
+		Text = "Elementos: 0  •  Tweens: 0  •  Mem: 0 MB",
+		Icon = "cpu",
+	})
+	local perfDetailLabel = tab:AddLabel({
+		Text = "GuiObjects: 0  •  Conexoes: 0  •  Janelas: 1",
+		Icon = "chart",
+	})
+	local togglePerfHud = tab:AddToggle({
+		Name = "Painel flutuante (HUD)", Icon = "monitor", Default = self._perfHudVisible == true,
+		Callback = function(value)
+			if self._syncing then return end
+			self:SetPerformanceMonitorVisible(value)
+		end,
+	})
+	local togglePerfCompact = tab:AddToggle({
+		Name = "HUD compacto", Icon = "minimize", Default = self._perfHudCompact == true,
+		Callback = function(value)
+			if self._syncing then return end
+			self:SetPerformanceMonitorCompact(value)
+		end,
+	})
+	local sliderPerfInterval = tab:AddSlider({
+		Name = "Intervalo do monitor", Icon = "clock",
+		Min = 0.2, Max = 1.5, Step = 0.1, Suffix = "s",
+		Default = PerfMonitor.Interval,
+		Callback = function(value)
+			if self._syncing then return end
+			AetherUI.SetPerformanceMonitorInterval(value)
+		end,
+	})
+
+	local function syncAnimationsControls()
+		toggleAnimEnabled:Set(AnimConfig.Enabled == true, true)
+		toggleReduceMotion:Set(AnimConfig.ReduceMotion == true, true)
+		ddAnimEffect:Set(AnimConfig.Effect, true)
+		ddAnimStyle:Set(AnimConfig.Style, true)
+		sliderAnimSpeed:Set(AnimConfig.Speed, true)
+		sliderAnimIntensity:Set(AnimConfig.Intensity, true)
+		syncCategoryControls()
+	end
+	local function syncMonitorControls()
+		togglePerfHud:Set(self._perfHudVisible == true, true)
+		togglePerfCompact:Set(self._perfHudCompact == true, true)
+		sliderPerfInterval:Set(PerfMonitor.Interval, true)
+	end
+
 	tab:AddSection({ Text = "Configuracoes", Icon = "save" })
 	local configStatus = tab:AddLabel({
 		Text = "Perfil: " .. tostring(self._configFolder or "AetherUI") .. "/" .. tostring(self._configFile or "default") .. ".json",
@@ -5271,6 +5464,8 @@ function Window:_buildSettings()
 	self._settingsControls = {
 		Compact = toggleCompact, Sidebar = toggleSidebar,
 		LowPerformance = toggleLow, SyncAccent = syncAccent, ConfigStatus = configStatus,
+		SyncAnimations = syncAnimationsControls, SyncMonitor = syncMonitorControls,
+		PerfLabels = { Main = perfMainLabel, Stats = perfStatsLabel, Detail = perfDetailLabel },
 	}
 end
 
@@ -5376,6 +5571,67 @@ local function deserializeConfigValue(val)
 	return val
 end
 
+local function serializeAnimConfig()
+	local cats = {}
+	for _, key in ipairs(AnimCategoryOrder) do
+		local c = AnimConfig.Categories[key]
+		if c then
+			cats[key] = {
+				Enabled = c.Enabled == true,
+				Effect = tostring(c.Effect or "Fade+Scale"),
+				Speed = tonumber(c.Speed) or 1,
+				Style = tostring(c.Style or "Auto"),
+				Direction = tostring(c.Direction or "Out"),
+				Intensity = tonumber(c.Intensity) or 1,
+			}
+		end
+	end
+	return {
+		Enabled = AnimConfig.Enabled == true,
+		ReduceMotion = AnimConfig.ReduceMotion == true,
+		Speed = tonumber(AnimConfig.Speed) or 1,
+		Style = tostring(AnimConfig.Style or "Auto"),
+		Direction = tostring(AnimConfig.Direction or "Out"),
+		Intensity = tonumber(AnimConfig.Intensity) or 1,
+		Effect = tostring(AnimConfig.Effect or "Fade+Scale"),
+		Categories = cats,
+	}
+end
+
+local function refreshAllWindowsAnimations()
+	for _, win in ipairs(Windows) do
+		if win._state ~= "Destroyed" then
+			win:_applyPerformance()
+		end
+	end
+end
+
+local function applyAnimConfigTable(tbl, skipRefresh)
+	if typeof(tbl) ~= "table" then return end
+	if typeof(tbl.Enabled) == "boolean" then AnimConfig.Enabled = tbl.Enabled end
+	if typeof(tbl.ReduceMotion) == "boolean" then AnimConfig.ReduceMotion = tbl.ReduceMotion end
+	if tonumber(tbl.Speed) then AnimConfig.Speed = math.clamp(tonumber(tbl.Speed), 0.25, 4) end
+	if tonumber(tbl.Intensity) then AnimConfig.Intensity = math.clamp(tonumber(tbl.Intensity), 0, 2) end
+	if tbl.Style ~= nil then AnimConfig.Style = normalizeStyleName(tbl.Style, true) end
+	if tbl.Direction ~= nil then AnimConfig.Direction = normalizeDirectionName(tbl.Direction) end
+	if tbl.Effect ~= nil then AnimConfig.Effect = normalizeEffectName(tbl.Effect) end
+	if typeof(tbl.Categories) == "table" then
+		for rawKey, rawCat in pairs(tbl.Categories) do
+			local key = resolveCategoryKey(rawKey)
+			local target = key and AnimConfig.Categories[key]
+			if target and typeof(rawCat) == "table" then
+				if typeof(rawCat.Enabled) == "boolean" then target.Enabled = rawCat.Enabled end
+				if tonumber(rawCat.Speed) then target.Speed = math.clamp(tonumber(rawCat.Speed), 0.25, 4) end
+				if tonumber(rawCat.Intensity) then target.Intensity = math.clamp(tonumber(rawCat.Intensity), 0, 2) end
+				if rawCat.Style ~= nil then target.Style = normalizeStyleName(rawCat.Style, true) end
+				if rawCat.Direction ~= nil then target.Direction = normalizeDirectionName(rawCat.Direction) end
+				if rawCat.Effect ~= nil then target.Effect = normalizeEffectName(rawCat.Effect) end
+			end
+		end
+	end
+	if not skipRefresh then refreshAllWindowsAnimations() end
+end
+
 function Window:_resolveConfigPath(fileName)
 	local folder = sanitizeFileName(self._configFolder or self._guiName or "AetherUI")
 	local file = sanitizeFileName(fileName or self._configFile or "default")
@@ -5393,6 +5649,12 @@ function Window:ExportConfig(asTable)
 			Compact = self._compact == true,
 			LowPerformance = State.LowPerformance == true,
 			Favorites = self:GetFavorites(),
+			Animations = serializeAnimConfig(),
+			PerformanceMonitor = {
+				Visible = self._perfHudVisible == true,
+				Compact = self._perfHudCompact == true,
+				Interval = PerfMonitor.Interval,
+			},
 		},
 		Flags = {},
 	}
@@ -5432,6 +5694,13 @@ function Window:ImportConfig(dataOrJson, silent)
 		if typeof(meta.Compact) == "boolean" then self:SetCompact(meta.Compact) end
 		if typeof(meta.LowPerformance) == "boolean" then AetherUI.SetLowPerformance(meta.LowPerformance) end
 		if typeof(meta.Favorites) == "table" then self:SetFavorites(meta.Favorites) end
+		if typeof(meta.Animations) == "table" then applyAnimConfigTable(meta.Animations, false) end
+		if typeof(meta.PerformanceMonitor) == "table" then
+			local pm = meta.PerformanceMonitor
+			if tonumber(pm.Interval) then AetherUI.SetPerformanceMonitorInterval(pm.Interval) end
+			if typeof(pm.Compact) == "boolean" then self:SetPerformanceMonitorCompact(pm.Compact) end
+			if typeof(pm.Visible) == "boolean" then self:SetPerformanceMonitorVisible(pm.Visible) end
+		end
 	end
 
 	local flagsData = typeof(decoded.Flags) == "table" and decoded.Flags or decoded
@@ -5530,24 +5799,309 @@ function Window:LoadConfiguration(fileName, silent) return self:LoadConfig(fileN
 function Window:DeleteConfiguration(fileName) return self:DeleteConfig(fileName) end
 function Window:ListConfigurations() return self:ListConfigs() end
 
+function Window:_perfHudSize()
+	local mobile = self._metrics and self._metrics.Mobile
+	if self._perfHudCompact then
+		return Vector2.new(mobile and 188 or 204, 58)
+	end
+	return Vector2.new(mobile and 220 or 236, 118)
+end
+
+function Window:_needsPerfUpdates()
+	if self._state == "Destroyed" then return false end
+	if self._perfHudVisible == true then return true end
+	local openWindow = self._state == "Open" or self._state == "Opening" or self._state == "Restoring"
+	if openWindow and self._settingsTab and self._selectedTab == self._settingsTab then
+		return true
+	end
+	return false
+end
+
+function Window:_updatePerfViews()
+	if self._state == "Destroyed" then return end
+	local st = PerfMonitor.Stats
+	local fpsColor = st.FPS >= 50 and Theme.Success or (st.FPS >= 30 and Theme.Warning or Theme.Danger)
+
+	local labels = self._settingsControls and self._settingsControls.PerfLabels
+	if labels then
+		if labels.Main then
+			labels.Main:SetText(string.format("FPS: %d (%.1f ms)  •  Uptime: %s", st.FPS, st.FrameTimeMs, formatDurationClock(st.Uptime)))
+		end
+		if labels.Stats then
+			labels.Stats:SetText(string.format("Elementos: %d  •  Tweens: %d  •  Mem: %.1f MB", st.ActiveElements, st.ActiveTweens, st.MemoryMB))
+		end
+		if labels.Detail then
+			labels.Detail:SetText(string.format("GuiObjects: %d  •  Conexoes: %d  •  Janelas: %d", st.GuiObjects, st.Connections, st.Windows))
+		end
+	end
+
+	local refs = self._perfHudRefs
+	if refs then
+		refs.FpsText.Text = string.format("%d FPS", st.FPS)
+		refs.FpsText.TextColor3 = fpsColor
+		refs.FpsDot.BackgroundColor3 = fpsColor
+		refs.MsText.Text = string.format("%.1f ms", st.FrameTimeMs)
+		refs.UptimeVal.Text = formatDurationClock(st.Uptime)
+		refs.ElementsVal.Text = string.format("%d (%d gui)", st.ActiveElements, st.GuiObjects)
+		refs.TweensVal.Text = string.format("%d / %d", st.ActiveTweens, st.Connections)
+		refs.MemVal.Text = string.format("%.1f MB", st.MemoryMB)
+		refs.CompactLine.Text = string.format("Up %s  •  Elem %d  •  %.0f MB", formatDurationClock(st.Uptime), st.ActiveElements, st.MemoryMB)
+	end
+end
+
+function Window:_buildPerfHud(initialVisible, initialCompact)
+	self._perfHudVisible = initialVisible == true
+	self._perfHudCompact = initialCompact == true
+	local sz = self:_perfHudSize()
+	local viewport = getViewport()
+	local insetTop = getGuiInset().Y
+	local startPos = clampHudPosition(UDim2.fromOffset(viewport.X - sz.X - 14, insetTop + 12), sz)
+
+	local hud = create("CanvasGroup", {
+		Name = "PerformanceHUD",
+		Position = startPos,
+		Size = UDim2.fromOffset(sz.X, sz.Y),
+		BackgroundColor3 = Theme.Surface,
+		BackgroundTransparency = Glass.Card,
+		GroupTransparency = self._perfHudVisible and 0 or 1,
+		Visible = self._perfHudVisible,
+		Active = true,
+		ZIndex = 35,
+		Parent = self._gui,
+	})
+	addCorner(hud, 11)
+	local hudStroke = addStroke(hud, Theme.Stroke, 0.25, 1)
+	local hudScale = create("UIScale", { Scale = self._perfHudVisible and 1 or 0.9, Parent = hud })
+
+	local header = create("Frame", {
+		Name = "Header", BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 26), Active = true, Parent = hud,
+	})
+	local fpsDot = create("Frame", {
+		Name = "Dot", AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 10, 0.5, 0),
+		Size = UDim2.fromOffset(7, 7), BackgroundColor3 = Theme.Success, Parent = header,
+	})
+	addCornerScale(fpsDot, 0.5)
+	local fpsText = create("TextLabel", {
+		Name = "FPS", BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(22, 0), Size = UDim2.fromOffset(64, 26),
+		Text = "60 FPS", Font = Theme.FontBold, TextSize = 12,
+		TextColor3 = Theme.Success, TextXAlignment = Enum.TextXAlignment.Left, Parent = header,
+	})
+	local msText = create("TextLabel", {
+		Name = "MS", BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(82, 0), Size = UDim2.new(1, -134, 0, 26),
+		Text = "16.7 ms", Font = Theme.Font, TextSize = 10,
+		TextColor3 = Theme.SubText, TextXAlignment = Enum.TextXAlignment.Left, Parent = header,
+	})
+
+	local compactBtn = create("TextButton", {
+		Name = "ToggleSize", AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -28, 0.5, 0), Size = UDim2.fromOffset(20, 20),
+		BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.2,
+		AutoButtonColor = false, Text = self._perfHudCompact and "+" or "-",
+		Font = Theme.FontBold, TextSize = 12, TextColor3 = Theme.SubText, Parent = header,
+	})
+	addCorner(compactBtn, 6)
+
+	local closeHudBtn = create("TextButton", {
+		Name = "CloseHUD", AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -6, 0.5, 0), Size = UDim2.fromOffset(20, 20),
+		BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.2,
+		AutoButtonColor = false, Text = "x",
+		Font = Theme.FontBold, TextSize = 11, TextColor3 = Theme.SubText, Parent = header,
+	})
+	addCorner(closeHudBtn, 6)
+
+	local accentBar = create("Frame", {
+		Name = "Line", Position = UDim2.fromOffset(0, 26),
+		Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = accent(), BackgroundTransparency = 0.45, Parent = hud,
+	})
+
+	local compactLine = create("TextLabel", {
+		Name = "CompactInfo", BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(10, 30), Size = UDim2.new(1, -20, 0, 22),
+		Text = "Up 00:00  •  Elem 0  •  0 MB", Font = Theme.Font, TextSize = 11,
+		TextColor3 = Theme.SubText, TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd, Visible = self._perfHudCompact, Parent = hud,
+	})
+
+	local grid = create("Frame", {
+		Name = "Grid", BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(10, 32), Size = UDim2.new(1, -20, 1, -38),
+		Visible = not self._perfHudCompact, Parent = hud,
+	})
+
+	local function makeCell(titleStr, xScale, yOffset)
+		local box = create("Frame", {
+			BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.45,
+			Position = UDim2.new(xScale, xScale > 0 and 3 or 0, 0, yOffset),
+			Size = UDim2.new(0.5, -3, 0, 36), Parent = grid,
+		})
+		addCorner(box, 7)
+		create("TextLabel", {
+			BackgroundTransparency = 1, Position = UDim2.fromOffset(7, 3),
+			Size = UDim2.new(1, -14, 0, 12), Text = titleStr,
+			Font = Theme.FontBold, TextSize = 9, TextColor3 = Theme.Muted,
+			TextXAlignment = Enum.TextXAlignment.Left, Parent = box,
+		})
+		local val = create("TextLabel", {
+			BackgroundTransparency = 1, Position = UDim2.fromOffset(7, 16),
+			Size = UDim2.new(1, -14, 0, 16), Text = "-",
+			Font = Theme.FontBold, TextSize = 11, TextColor3 = Theme.Text,
+			TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd, Parent = box,
+		})
+		return val
+	end
+
+	local uptimeVal = makeCell("UPTIME", 0, 0)
+	local elementsVal = makeCell("ELEMENTOS", 0.5, 0)
+	local tweensVal = makeCell("TWEENS / CONX", 0, 42)
+	local memVal = makeCell("MEMORIA", 0.5, 42)
+
+	self._perfHud = hud
+	self._perfHudScale = hudScale
+	self._perfHudRefs = {
+		FpsDot = fpsDot, FpsText = fpsText, MsText = msText,
+		CompactBtn = compactBtn, CompactLine = compactLine, Grid = grid,
+		UptimeVal = uptimeVal, ElementsVal = elementsVal, TweensVal = tweensVal, MemVal = memVal,
+	}
+
+	makeDraggable(hud, hud, self._connections, {
+		Clamp = function(pos) return clampHudPosition(pos, self:_perfHudSize()) end,
+	})
+
+	compactBtn.Activated:Connect(function()
+		self:SetPerformanceMonitorCompact(not (self._perfHudCompact == true))
+	end)
+	closeHudBtn.Activated:Connect(function()
+		self:SetPerformanceMonitorVisible(false)
+	end)
+	self:_onAccent(function(animate)
+		setProps(accentBar, { BackgroundColor3 = accent() }, animate, Anim.Normal)
+		setProps(hudStroke, { Color = State.LowPerformance and Theme.Stroke or Theme.Stroke }, animate, Anim.Normal)
+	end)
+end
+
+function Window:SetPerformanceMonitorVisible(value)
+	value = value == true
+	if self._state == "Destroyed" or self._perfHudVisible == value then return end
+	self._perfHudVisible = value
+	local hud = self._perfHud
+	local hudScale = self._perfHudScale
+	if hud then
+		local pCfg = resolveAnim("Panels", Anim.Fast)
+		if value then
+			local sz = self:_perfHudSize()
+			local targetPos = clampHudPosition(hud.Position, sz)
+			hud.Size = UDim2.fromOffset(sz.X, sz.Y)
+			hud.Position = targetPos
+			hud.Visible = true
+			if pCfg.Active then
+				hud.GroupTransparency = pCfg.Fade and 1 or 0
+				if hudScale then
+					hudScale.Scale = pCfg.Scale and math.max(0.78, 1 - 0.14 * pCfg.Intensity) or 1
+					tween(hudScale, Anim.Normal, { Scale = 1 }, nil, nil, "Panels")
+				end
+				if pCfg.Slide then
+					hud.Position = targetPos + UDim2.fromOffset(0, math.round(-10 * pCfg.Intensity))
+				end
+				tween(hud, Anim.Normal, { GroupTransparency = 0, Position = targetPos }, nil, nil, "Panels")
+			else
+				hud.GroupTransparency = 0
+				if hudScale then hudScale.Scale = 1 end
+			end
+		else
+			if pCfg.Active then
+				local hideProps = { GroupTransparency = pCfg.Fade and 1 or 0 }
+				if pCfg.Slide then
+					hideProps.Position = hud.Position + UDim2.fromOffset(0, math.round(-8 * pCfg.Intensity))
+				end
+				if hudScale and pCfg.Scale then
+					tween(hudScale, Anim.Fast, { Scale = math.max(0.78, 1 - 0.14 * pCfg.Intensity) }, nil, nil, "Panels")
+				end
+				local t = tween(hud, Anim.Fast, hideProps, nil, nil, "Panels")
+				t.Completed:Connect(function()
+					if not self._perfHudVisible and hud.Parent then
+						hud.Visible = false
+						hud.Position = clampHudPosition(hud.Position, self:_perfHudSize())
+					end
+				end)
+			else
+				hud.Visible = false
+				hud.GroupTransparency = 1
+			end
+		end
+	end
+	refreshPerfSubscription()
+	if value then
+		samplePerfSnapshot(nil, nil)
+		self:_updatePerfViews()
+	end
+	self:_syncSettings()
+end
+
+function Window:GetPerformanceMonitorVisible()
+	return self._perfHudVisible == true
+end
+
+function Window:TogglePerformanceMonitor()
+	self:SetPerformanceMonitorVisible(not (self._perfHudVisible == true))
+end
+
+function Window:SetPerformanceMonitorCompact(value)
+	value = value == true
+	if self._state == "Destroyed" or self._perfHudCompact == value then return end
+	self._perfHudCompact = value
+	local hud, refs = self._perfHud, self._perfHudRefs
+	if hud and refs then
+		local sz = self:_perfHudSize()
+		local clampedPos = clampHudPosition(hud.Position, sz)
+		refs.CompactLine.Visible = value
+		refs.Grid.Visible = not value
+		refs.CompactBtn.Text = value and "+" or "-"
+		tween(hud, Anim.Fast, {
+			Size = UDim2.fromOffset(sz.X, sz.Y),
+			Position = clampedPos,
+		}, nil, nil, "Panels")
+	end
+	self:_syncSettings()
+end
+
+function Window:GetPerformanceStats()
+	return AetherUI.GetPerformanceStats()
+end
+
 function Window:_showBall()
 	self._ball.Position = clampBallPosition(self._ball.Position, self._metrics.Ball)
 	self._ball.Visible = true
-	self._ballScale.Scale = 0
-	tween(self._ballScale, Anim.Normal + 0.05, { Scale = 1 }, Enum.EasingStyle.Back)
+	local bCfg = resolveAnim("Ball", Anim.Normal + 0.05, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 	if self._pulse then self._pulse:Cancel(); self._pulse = nil end
-	if State.LowPerformance then self._ballStroke.Transparency = 0.35; return end
+	if bCfg.Active then
+		self._ball.BackgroundTransparency = bCfg.Fade and 1 or Glass.Ball
+		self._ballScale.Scale = bCfg.Scale and math.max(0.15, 1 - 0.85 * bCfg.Intensity) or 1
+		tween(self._ball, Anim.Normal + 0.05, { BackgroundTransparency = Glass.Ball }, nil, nil, "Ball")
+		tween(self._ballScale, Anim.Normal + 0.05, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, "Ball")
+	else
+		self._ball.BackgroundTransparency = Glass.Ball
+		self._ballScale.Scale = 1
+	end
+	if State.LowPerformance or not bCfg.Active or bCfg.ReduceMotion then
+		self._ballStroke.Transparency = 0.35
+		return
+	end
 	self._ballStroke.Transparency = 0.7
 	self._pulse = TweenService:Create(
 		self._ballStroke,
-		TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		TweenInfo.new(1.1 / math.max(AnimConfig.Speed or 1, 0.35), Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
 		{ Transparency = 0.2 }
 	)
 	self._pulse:Play()
 end
 
 -- Estado + atividade. Toda mudanca de estado passa por aqui para que os
--- Heartbeats (luas/estrelas) liguem e desliguem junto com a visibilidade.
+-- Heartbeats (luas/estrelas/perf monitor) liguem e desliguem junto com a visibilidade.
 function Window:_setState(state)
 	if self._state == "Destroyed" and state ~= "Destroyed" then return end
 	self._state = state
@@ -5566,6 +6120,7 @@ function Window:_refreshActivity()
 	if self._setStarsRunning then
 		self._setStarsRunning(shown and (self._starsOn == true or os.clock() < (self._starsUntil or 0)))
 	end
+	refreshPerfSubscription()
 end
 
 -- Minimizar/Restaurar: maquina de estados por TOKEN + timers. Nao depende de
@@ -5585,19 +6140,32 @@ function Window:Minimize()
 	self:_setState("Minimizing")
 	self:_closeDropdowns()
 	self._ball.Position = clampBallPosition(self._ball.Position, self._metrics.Ball)
-	local duration = Anim.Normal + 0.1
-	tween(root, duration, {
-		Position = self._ball.Position, GroupTransparency = 1,
-	}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-	tween(self._scale, duration, { Scale = 0.1 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
 
+	local wCfg = resolveAnim("Window", Anim.Normal + 0.1, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
 	local function finish()
 		if self._transition ~= token or self._state ~= "Minimizing" then return end
 		root.Visible = false
 		self:_setState("Minimized")
 		self:_showBall()
 	end
-	if State.LowPerformance then finish() else task.delay(duration + 0.04, finish) end
+	if not wCfg.Active then
+		root.GroupTransparency = 1
+		self._scale.Scale = 1
+		finish()
+		return
+	end
+	local outProps = { GroupTransparency = wCfg.Fade and 1 or root.GroupTransparency }
+	if wCfg.Slide or wCfg.Scale then
+		outProps.Position = self._ball.Position
+	end
+	tween(root, Anim.Normal + 0.1, outProps, Enum.EasingStyle.Quint, Enum.EasingDirection.In, "Window")
+	if wCfg.Scale then
+		tween(self._scale, Anim.Normal + 0.1, { Scale = math.max(0.1, 1 - 0.9 * wCfg.Intensity) }, Enum.EasingStyle.Quint, Enum.EasingDirection.In, "Window")
+	end
+	if wCfg.Blur then
+		triggerBlurPulse(6 * wCfg.Intensity, wCfg.Duration)
+	end
+	task.delay(wCfg.Duration + 0.04, finish)
 end
 
 function Window:Restore()
@@ -5613,41 +6181,64 @@ function Window:Restore()
 		self:_setState("Open")
 	end
 
+	local wCfg = resolveAnim("Window", Anim.Slow)
+	local bCfg = resolveAnim("Ball", Anim.Fast)
+
 	if state == "Minimizing" then
-		-- minimizacao em andamento: o painel ainda esta visivel, so reverte
 		self:_setState("Restoring")
 		local size = self:_getSize()
-		tween(root, Anim.Slow, {
-			Position = clampWindowPosition(self._restorePosition or root.Position, size),
-			GroupTransparency = 0,
-		})
-		tween(self._scale, Anim.Slow, { Scale = 1 })
-		task.delay(Anim.Slow + 0.05, settle)
+		local targetPos = clampWindowPosition(self._restorePosition or root.Position, size)
+		if wCfg.Active then
+			tween(root, Anim.Slow, { Position = targetPos, GroupTransparency = 0 }, nil, nil, "Window")
+			tween(self._scale, Anim.Slow, { Scale = 1 }, nil, nil, "Window")
+			task.delay(wCfg.Duration + 0.05, settle)
+		else
+			root.Position = targetPos
+			root.GroupTransparency = 0
+			self._scale.Scale = 1
+			settle()
+		end
 		return
 	end
 
 	self:_setState("Restoring")
 	local ballPosition = clampBallPosition(self._ball.Position, self._metrics.Ball)
-	tween(self._ballScale, Anim.Fast, { Scale = 0 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	if bCfg.Active then
+		tween(self._ballScale, Anim.Fast, { Scale = bCfg.Scale and 0 or 1 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In, "Ball")
+		if bCfg.Fade then tween(self._ball, Anim.Fast, { BackgroundTransparency = 1 }, nil, nil, "Ball") end
+	end
 
 	local function expand()
 		if self._transition ~= token or self._state ~= "Restoring" then return end
 		self._ball.Visible = false
+		self._ball.BackgroundTransparency = Glass.Ball
 		local size = self:_getSize()
+		local targetPos = clampWindowPosition(self._restorePosition or ballPosition, size)
 		root.Size = size
-		root.Position = ballPosition
-		root.GroupTransparency = 1
-		self._scale.Scale = 0.1
-		root.Visible = true
-		self:_refreshActivity()
-		self:_applyLayout(false)
-		tween(root, Anim.Slow, {
-			Position = clampWindowPosition(self._restorePosition or ballPosition, size), GroupTransparency = 0,
-		})
-		tween(self._scale, Anim.Slow, { Scale = 1 })
-		task.delay(Anim.Slow + 0.05, settle)
+		if wCfg.Active then
+			root.Position = (wCfg.Slide or wCfg.Scale) and ballPosition or targetPos
+			root.GroupTransparency = wCfg.Fade and 1 or 0
+			self._scale.Scale = wCfg.Scale and math.max(0.1, 1 - 0.9 * wCfg.Intensity) or 1
+			root.Visible = true
+			self:_refreshActivity()
+			self:_applyLayout(false)
+			tween(root, Anim.Slow, { Position = targetPos, GroupTransparency = 0 }, nil, nil, "Window")
+			tween(self._scale, Anim.Slow, { Scale = 1 }, nil, nil, "Window")
+			if wCfg.Blur then
+				triggerBlurPulse(6 * wCfg.Intensity, wCfg.Duration)
+			end
+			task.delay(wCfg.Duration + 0.05, settle)
+		else
+			root.Position = targetPos
+			root.GroupTransparency = 0
+			self._scale.Scale = 1
+			root.Visible = true
+			self:_refreshActivity()
+			self:_applyLayout(false)
+			settle()
+		end
 	end
-	if State.LowPerformance then expand() else task.delay(Anim.Fast + 0.03, expand) end
+	if not bCfg.Active then expand() else task.delay(bCfg.Duration + 0.03, expand) end
 end
 
 ----------------------------------------------------------------
@@ -5657,6 +6248,8 @@ function Window:_showCloseConfirm()
 	if self._confirmLayer and self._confirmLayer.Parent then return end
 	if self._confirmLayer then self._confirmLayer:Destroy() end
 
+	local pCfg = resolveAnim("Panels", Anim.Slow, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+
 	local gui = self._gui
 	local layer = create("Frame", {
 		Name = "CloseConfirm", BackgroundTransparency = 1,
@@ -5665,7 +6258,6 @@ function Window:_showCloseConfirm()
 	})
 	self._confirmLayer = layer
 
-	-- Blur leve via UIBlur (funciona sem assets)
 	local blur = create("Frame", {
 		Name = "BlurProxy", BackgroundTransparency = 1,
 		Size = UDim2.fromScale(1, 1), Parent = layer,
@@ -5688,9 +6280,10 @@ function Window:_showCloseConfirm()
 		BackgroundColor3 = Theme.Surface, BackgroundTransparency = Glass.Card,
 		GroupTransparency = 1, Parent = layer,
 	})
+	local cardScale = create("UIScale", { Scale = 1, Parent = card })
 	addCorner(card, 14)
 	addStroke(card, Theme.Stroke, 0.3, 1)
-	attachShadow(card, layer, 14)
+	attachShadow(card, layer, 14, cardScale)
 
 	local title = create("TextLabel", {
 		Name = "Title", BackgroundTransparency = 1,
@@ -5724,7 +6317,6 @@ function Window:_showCloseConfirm()
 		return b
 	end
 	local noBtn = makeBtn("Nao", 0.5, Theme.Element, Theme.Text)
-	noBtn.Position = UDim2.new(0.5, 0, 1, -16)
 	noBtn.AnchorPoint = Vector2.new(1, 1)
 	noBtn.Size = UDim2.fromOffset(120, 34)
 	noBtn.Position = UDim2.new(0.5, -6, 1, -16)
@@ -5733,18 +6325,28 @@ function Window:_showCloseConfirm()
 
 	local function microButton(b)
 		local s = create("UIScale", { Parent = b })
-		b.MouseEnter:Connect(function() tween(s, Anim.Fast, { Scale = 1.04 }) end)
-		b.MouseLeave:Connect(function() tween(s, Anim.Fast, { Scale = 1 }) end)
-		b.MouseButton1Down:Connect(function() tween(s, Anim.Micro, { Scale = 0.94 }) end)
+		b.MouseEnter:Connect(function()
+			local hCfg = resolveAnim("Hover", Anim.Fast)
+			if hCfg.Active and not hCfg.ReduceMotion then
+				tween(s, Anim.Fast, { Scale = 1 + 0.04 * hCfg.Intensity }, nil, nil, "Hover")
+			end
+		end)
+		b.MouseLeave:Connect(function() tween(s, Anim.Fast, { Scale = 1 }, nil, nil, "Hover") end)
+		b.MouseButton1Down:Connect(function()
+			local hCfg = resolveAnim("Hover", Anim.Micro)
+			if hCfg.Active and not hCfg.ReduceMotion then
+				tween(s, Anim.Micro, { Scale = 1 - 0.06 * hCfg.Intensity }, nil, nil, "Hover")
+			end
+		end)
 		b.MouseButton1Up:Connect(function()
-			tween(s, Anim.Spring, { Scale = 1.04 }, Enum.EasingStyle.Back)
+			tween(s, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, "Hover")
 		end)
 	end
 	microButton(noBtn); microButton(yesBtn)
-	if not State.LowPerformance then
+	if pCfg.Active and not pCfg.ReduceMotion then
 		local function reveal(object, delay, props)
-			task.delay(delay, function()
-				if object.Parent then tween(object, Anim.Smooth, props) end
+			task.delay(delay / math.max(AnimConfig.Speed or 1, 0.35), function()
+				if object.Parent then tween(object, Anim.Smooth, props, nil, nil, "Panels") end
 			end)
 		end
 		title.TextTransparency = 1
@@ -5766,28 +6368,35 @@ function Window:_showCloseConfirm()
 
 	local function closeConfirm()
 		if not layer.Parent then return end
-		local t = tween(card, Anim.Fast, {
-			GroupTransparency = 1, Size = UDim2.fromOffset(240, 130),
-		}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-		tween(overlay, Anim.Fast, { BackgroundTransparency = 1 })
-		t.Completed:Connect(function() layer:Destroy() end)
+		setModalBlur(false)
+		local closeCfg = resolveAnim("Panels", Anim.Fast)
+		if closeCfg.Active then
+			local t = tween(card, Anim.Fast, {
+				GroupTransparency = closeCfg.Fade and 1 or 0,
+			}, Enum.EasingStyle.Quint, Enum.EasingDirection.In, "Panels")
+			tween(cardScale, Anim.Fast, { Scale = closeCfg.Scale and 0.88 or 1 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In, "Panels")
+			tween(overlay, Anim.Fast, { BackgroundTransparency = 1 }, nil, nil, "Panels")
+			t.Completed:Connect(function() if layer.Parent then layer:Destroy() end end)
+		else
+			layer:Destroy()
+		end
 		self._confirmLayer = nil
 		self._confirming = false
 	end
 
 	noBtn.MouseEnter:Connect(function()
-		tween(noBtn, Anim.Fast, { BackgroundColor3 = Theme.ElementHover })
+		tween(noBtn, Anim.Fast, { BackgroundColor3 = Theme.ElementHover }, nil, nil, "Hover")
 	end)
 	noBtn.MouseLeave:Connect(function()
-		tween(noBtn, Anim.Fast, { BackgroundColor3 = Theme.Element })
+		tween(noBtn, Anim.Fast, { BackgroundColor3 = Theme.Element }, nil, nil, "Hover")
 	end)
 	noBtn.Activated:Connect(closeConfirm)
 
 	yesBtn.MouseEnter:Connect(function()
-		tween(yesBtn, Anim.Fast, { BackgroundColor3 = Theme.Danger:Lerp(Theme.White, 0.1) })
+		tween(yesBtn, Anim.Fast, { BackgroundColor3 = Theme.Danger:Lerp(Theme.White, 0.1) }, nil, nil, "Hover")
 	end)
 	yesBtn.MouseLeave:Connect(function()
-		tween(yesBtn, Anim.Fast, { BackgroundColor3 = Theme.Danger })
+		tween(yesBtn, Anim.Fast, { BackgroundColor3 = Theme.Danger }, nil, nil, "Hover")
 	end)
 	yesBtn.Activated:Connect(function()
 		closeConfirm()
@@ -5795,11 +6404,21 @@ function Window:_showCloseConfirm()
 	end)
 
 	self._confirming = true
-	card.Size = UDim2.fromOffset(220, 120)
-	tween(overlay, Anim.Slow, { BackgroundTransparency = 0.45 })
-	tween(card, Anim.Slow, {
-		GroupTransparency = 0, Size = UDim2.fromOffset(280, 156),
-	}, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+	if pCfg.Active then
+		if pCfg.Blur or (not State.LowPerformance and not pCfg.ReduceMotion) then
+			setModalBlur(true, 10 * math.max(pCfg.Intensity, 0.5), pCfg.Duration)
+		end
+		cardScale.Scale = pCfg.Scale and math.max(0.75, 1 - 0.18 * pCfg.Intensity) or 1
+		card.Position = pCfg.Slide and UDim2.new(0.5, 0, 0.5, math.round(14 * pCfg.Intensity)) or UDim2.fromScale(0.5, 0.5)
+		card.GroupTransparency = pCfg.Fade and 1 or 0
+		tween(overlay, Anim.Slow, { BackgroundTransparency = 0.45 }, nil, nil, "Panels")
+		tween(card, Anim.Slow, { GroupTransparency = 0, Position = UDim2.fromScale(0.5, 0.5) }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, "Panels")
+		tween(cardScale, Anim.Slow, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, "Panels")
+	else
+		overlay.BackgroundTransparency = 0.45
+		card.GroupTransparency = 0
+		cardScale.Scale = 1
+	end
 end
 
 function Window:Close(skipConfirm)
@@ -5812,15 +6431,29 @@ function Window:Close(skipConfirm)
 	self._transition = (self._transition or 0) + 1
 	self:_setState("Closing")
 	safeCall(self._onClose)
+	setModalBlur(false)
 	if wasHidden then self:Destroy(); return end
-	tween(self._root, Anim.Normal, { GroupTransparency = 1 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-	tween(self._scale, Anim.Normal, { Scale = 0.94 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-	if State.LowPerformance then self:Destroy() else task.delay(Anim.Normal + 0.03, function() self:Destroy() end) end
+	local wCfg = resolveAnim("Window", Anim.Normal, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	if not wCfg.Active then
+		self:Destroy()
+		return
+	end
+	local outProps = { GroupTransparency = wCfg.Fade and 1 or self._root.GroupTransparency }
+	if wCfg.Slide then
+		outProps.Position = self._root.Position + UDim2.fromOffset(0, math.round(14 * wCfg.Intensity))
+	end
+	tween(self._root, Anim.Normal, outProps, Enum.EasingStyle.Quint, Enum.EasingDirection.In, "Window")
+	if wCfg.Scale then
+		tween(self._scale, Anim.Normal, { Scale = math.max(0.84, 1 - 0.08 * wCfg.Intensity) }, Enum.EasingStyle.Quint, Enum.EasingDirection.In, "Window")
+	end
+	if wCfg.Blur then triggerBlurPulse(5 * wCfg.Intensity, wCfg.Duration) end
+	task.delay(wCfg.Duration + 0.03, function() self:Destroy() end)
 end
 
 function Window:Destroy()
 	if self._state == "Destroyed" then return end
 	self._state = "Destroyed"
+	PerfMonitor.Subscribers[self] = nil
 	for index, window in ipairs(Windows) do
 		if window == self then table.remove(Windows, index); break end
 	end
@@ -5833,12 +6466,19 @@ function Window:Destroy()
 		cancelTweensUnder(self._gui)
 		self._gui:Destroy()
 	end
+	refreshPerfSubscription()
+	if #Windows == 0 then
+		clearTransitionBlur(true)
+	end
 end
 
 function Window:_onViewportChanged()
 	if self._state == "Destroyed" then return end
 	if self._state == "Open" then self:_resize(true) end
 	self._ball.Position = clampBallPosition(self._ball.Position, self._metrics.Ball)
+	if self._perfHud then
+		self._perfHud.Position = clampHudPosition(self._perfHud.Position, self:_perfHudSize())
+	end
 end
 
 function Window:_bindCamera()
@@ -5852,7 +6492,7 @@ function Window:_bindCamera()
 end
 
 ----------------------------------------------------------------
--- API publica
+-- API publica (Temas, Animacoes & Performance Monitor)
 ----------------------------------------------------------------
 function AetherUI.SetAccent(first, second)
 	local color = first
@@ -5870,6 +6510,99 @@ function AetherUI.SetLowPerformance(first, second)
 	for _, window in ipairs(Windows) do window:_applyPerformance() end
 end
 function AetherUI.GetLowPerformance() return State.LowPerformance end
+
+function AetherUI.SetAnimationsEnabled(first, second)
+	local value = first
+	if first == AetherUI then value = second end
+	AnimConfig.Enabled = value == true
+	if not AnimConfig.Enabled then clearTransitionBlur(true) end
+	refreshAllWindowsAnimations()
+end
+function AetherUI.GetAnimationsEnabled() return AnimConfig.Enabled == true end
+
+function AetherUI.SetReduceMotion(first, second)
+	local value = first
+	if first == AetherUI then value = second end
+	AnimConfig.ReduceMotion = value == true
+	if AnimConfig.ReduceMotion then clearTransitionBlur(true) end
+	refreshAllWindowsAnimations()
+end
+function AetherUI.GetReduceMotion() return AnimConfig.ReduceMotion == true end
+
+function AetherUI.SetAnimationConfig(first, second)
+	local cfg = first
+	if first == AetherUI then cfg = second end
+	if typeof(cfg) ~= "table" then return end
+	applyAnimConfigTable(cfg, false)
+end
+function AetherUI.GetAnimationConfig()
+	return serializeAnimConfig()
+end
+
+function AetherUI.SetCategoryAnimation(first, second, third)
+	local catName, cfg = first, second
+	if first == AetherUI then
+		catName, cfg = second, third
+	end
+	local key = resolveCategoryKey(catName)
+	if not key or typeof(cfg) ~= "table" then return false end
+	applyAnimConfigTable({ Categories = { [key] = cfg } }, false)
+	return true
+end
+function AetherUI.GetCategoryAnimation(first, second)
+	local catName = first
+	if first == AetherUI then catName = second end
+	local key = resolveCategoryKey(catName)
+	if not key then return nil end
+	local full = serializeAnimConfig()
+	return full.Categories[key]
+end
+
+function AetherUI.ResetAnimations()
+	AnimConfig = createDefaultAnimConfig()
+	clearTransitionBlur(true)
+	refreshAllWindowsAnimations()
+end
+
+function AetherUI.GetPerformanceStats()
+	local st = samplePerfSnapshot(nil, nil)
+	return {
+		FPS = st.FPS,
+		FrameTimeMs = st.FrameTimeMs,
+		Uptime = st.Uptime,
+		UptimeFormatted = formatDurationClock(st.Uptime),
+		ActiveElements = st.ActiveElements,
+		GuiObjects = st.GuiObjects,
+		ActiveTweens = st.ActiveTweens,
+		Connections = st.Connections,
+		MemoryMB = st.MemoryMB,
+		Windows = st.Windows,
+	}
+end
+function AetherUI.GetUptime()
+	return os.clock() - LibraryStartClock
+end
+function AetherUI.SetPerformanceMonitorInterval(first, second)
+	local sec = first
+	if first == AetherUI then sec = second end
+	if tonumber(sec) then
+		PerfMonitor.Interval = math.clamp(tonumber(sec), 0.15, 2)
+		for _, window in ipairs(Windows) do window:_syncSettings() end
+	end
+end
+function AetherUI.GetPerformanceMonitorInterval()
+	return PerfMonitor.Interval
+end
+
+function Window:SetAnimationsEnabled(value) AetherUI.SetAnimationsEnabled(value) end
+function Window:GetAnimationsEnabled() return AetherUI.GetAnimationsEnabled() end
+function Window:SetReduceMotion(value) AetherUI.SetReduceMotion(value) end
+function Window:GetReduceMotion() return AetherUI.GetReduceMotion() end
+function Window:SetAnimationConfig(cfg) AetherUI.SetAnimationConfig(cfg) end
+function Window:GetAnimationConfig() return AetherUI.GetAnimationConfig() end
+function Window:SetCategoryAnimation(category, cfg) return AetherUI.SetCategoryAnimation(category, cfg) end
+function Window:GetCategoryAnimation(category) return AetherUI.GetCategoryAnimation(category) end
+function Window:ResetAnimations() AetherUI.ResetAnimations() end
 
 function AetherUI.CreateWindow(config)
 	config = config or {}
@@ -5927,6 +6660,20 @@ function AetherUI.CreateWindow(config)
 		end
 	end
 
+	if typeof(config.Animations) == "table" then
+		applyAnimConfigTable(config.Animations, true)
+	end
+	local perfVisibleOpt, perfCompactOpt = false, false
+	if typeof(config.PerformanceMonitor) == "boolean" then
+		perfVisibleOpt = config.PerformanceMonitor
+	elseif typeof(config.PerformanceMonitor) == "table" then
+		perfVisibleOpt = config.PerformanceMonitor.Visible == true
+		perfCompactOpt = config.PerformanceMonitor.Compact == true
+		if tonumber(config.PerformanceMonitor.Interval) then
+			PerfMonitor.Interval = math.clamp(tonumber(config.PerformanceMonitor.Interval), 0.15, 2)
+		end
+	end
+
 	if self._autoLoadConfig then
 		local fs = getFsApi()
 		if fs then
@@ -5953,6 +6700,17 @@ function AetherUI.CreateWindow(config)
 							end
 							if typeof(decoded.Meta.LowPerformance) == "boolean" then
 								AetherUI.SetLowPerformance(decoded.Meta.LowPerformance)
+							end
+							if typeof(decoded.Meta.Animations) == "table" then
+								applyAnimConfigTable(decoded.Meta.Animations, true)
+							end
+							if typeof(decoded.Meta.PerformanceMonitor) == "table" then
+								local pm = decoded.Meta.PerformanceMonitor
+								if typeof(pm.Visible) == "boolean" then perfVisibleOpt = pm.Visible end
+								if typeof(pm.Compact) == "boolean" then perfCompactOpt = pm.Compact end
+								if tonumber(pm.Interval) then
+									PerfMonitor.Interval = math.clamp(tonumber(pm.Interval), 0.15, 2)
+								end
 							end
 							if typeof(decoded.Meta.Favorites) == "table" then
 								for _, fk in ipairs(decoded.Meta.Favorites) do
@@ -6423,10 +7181,17 @@ function AetherUI.CreateWindow(config)
 	self._ballScale = create("UIScale", { Scale = 0, Parent = ball })
 
 	ball.MouseEnter:Connect(function()
-		if self._state == "Minimized" then tween(self._ballScale, Anim.Fast, { Scale = 1.08 }) end
+		if self._state == "Minimized" then
+			local bCfg = resolveAnim("Ball", Anim.Fast)
+			if bCfg.Active and not bCfg.ReduceMotion then
+				tween(self._ballScale, Anim.Fast, { Scale = 1 + 0.08 * bCfg.Intensity }, nil, nil, "Ball")
+			end
+		end
 	end)
 	ball.MouseLeave:Connect(function()
-		if self._state == "Minimized" then tween(self._ballScale, Anim.Fast, { Scale = 1 }) end
+		if self._state == "Minimized" then
+			tween(self._ballScale, Anim.Fast, { Scale = 1 }, nil, nil, "Ball")
+		end
 	end)
 
 	makeDraggable(titleLabel, root, self._connections, {
@@ -6484,21 +7249,40 @@ function AetherUI.CreateWindow(config)
 		self:_refreshActivity()
 	end))
 
+	self:_buildPerfHud(perfVisibleOpt, perfCompactOpt)
+	PerfMonitor.Subscribers[self] = true
+
 	self:_bindCamera()
 	table.insert(self._connections, workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
 		self:_bindCamera(); self:_onViewportChanged()
 	end))
 	table.insert(Windows, self)
 
-	-- Animacao de abertura: fade-in (GroupTransparency 1 -> 0) + escala (0.85 -> 1)
-	root.GroupTransparency = 1
-	rootScale.Scale = 0.85
-	local openTween = tween(root, Anim.Slow + 0.1, { GroupTransparency = 0 }, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-	tween(rootScale, Anim.Slow + 0.15, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-	task.delay(Anim.Slow + 0.2, function()
-		if self._state == "Opening" then self:_setState("Open") end
-	end)
+	-- Animacao de abertura respeitando configuracao global/categoria Window (Fade/Slide/Scale/Blur)
+	local wCfg = resolveAnim("Window", Anim.Slow + 0.1, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+	if wCfg.Active then
+		root.GroupTransparency = wCfg.Fade and 1 or 0
+		rootScale.Scale = wCfg.Scale and math.max(0.7, 1 - 0.15 * wCfg.Intensity) or 1
+		root.Position = wCfg.Slide and UDim2.new(0.5, 0, 0.5, math.round(16 * wCfg.Intensity)) or UDim2.new(0.5, 0, 0.5, 0)
+		tween(root, Anim.Slow + 0.1, { GroupTransparency = 0, Position = UDim2.new(0.5, 0, 0.5, 0) }, Enum.EasingStyle.Quint, Enum.EasingDirection.Out, "Window")
+		tween(rootScale, Anim.Slow + 0.15, { Scale = 1 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out, "Window")
+		if wCfg.Blur then
+			triggerBlurPulse(8 * wCfg.Intensity, wCfg.Duration)
+		end
+		task.delay(wCfg.Duration + 0.12, function()
+			if self._state == "Opening" then self:_setState("Open") end
+		end)
+	else
+		root.GroupTransparency = 0
+		rootScale.Scale = 1
+		root.Position = UDim2.new(0.5, 0, 0.5, 0)
+		self:_setState("Open")
+	end
 	self:_refreshActivity()
+	if perfVisibleOpt then
+		samplePerfSnapshot(nil, nil)
+		self:_updatePerfViews()
+	end
 
 	return self
 end
@@ -6508,7 +7292,7 @@ end
 --
 -- Nada foi recriado: os Create* traduzem parametros e delegam aos Add*
 -- existentes, e os Add* continuam aceitando os parametros antigos
--- (Default, Min, Max, Step...). Documentacao completa: AetherUI_API.md
+-- (Default, Min, Max, Step...). Documentacao no cabecalho de AetherUI.lua.
 --
 -- Parametros (estilo Rayfield -> equivalente antigo):
 --   Toggle       Name, CurrentValue (Default), Flag, Callback(Value)
@@ -6782,7 +7566,7 @@ return AetherUI
 --[=[
 	EXEMPLO DE USO (LocalScript)
 
-	-- API padronizada (v2.7.0, estilo Rayfield) - mais exemplos em AetherUI_Examples.lua
+	-- API padronizada (v2.8.0, estilo Rayfield)
 	local win = AetherUI.CreateWindow({ Name = "Meu Hub" })
 	local tab = win:CreateTab("Principal", "home")
 	tab:CreateSection("Controles")
