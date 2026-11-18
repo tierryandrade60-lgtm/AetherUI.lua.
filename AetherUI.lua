@@ -6,10 +6,10 @@
 	        RadioGroup, ColorPicker, Search global, Favoritos e Save Configuration.
 	Cole TODO este arquivo em um unico ModuleScript ou carregue via loadstring.
 
-	v2.7.0 (Mobile + Dock + ColorPicker + RadioGroup + Save Config + Icones):
-	  - Floating Dock: aparece SOMENTE quando o painel principal esta minimizado;
-	    ao abrir/restaurar o painel o Dock desaparece; ao minimizar reaparece.
-	    Atalhos da pilula restauram a janela e executam a acao ao tocar.
+	v2.7.0 (Mobile + Bolinha + ColorPicker + RadioGroup + Save Config + Icones):
+	  - Floating Ball (Bolinha): aparece SOMENTE quando o painel principal esta
+	    minimizado; pode ser arrastada livremente por toda a tela dentro das bordas
+	    e reabre o painel ao tocar sem disparar durante o arraste.
 	  - Mobile & Toque: deteccao aprimorada, viewport responsivo retrato/paisagem,
 	    clamping seguro abaixo do topbar e alvos de toque confortaveis.
 	  - ColorPicker: calibragem inteligente de coordenadas (Mouse/Touch/GuiInset/
@@ -93,7 +93,6 @@ local State = {
 }
 
 local Windows = {}
-local DockMemory = { Position = nil, Hidden = false }
 
 local DefaultSwatches = {
 	Color3.fromRGB(124, 92, 255), Color3.fromRGB(59, 130, 246),
@@ -583,9 +582,11 @@ end
 local function clampBallPosition(position, diameter)
 	local viewport = getViewport()
 	local r = diameter / 2 + 4
+	local cx = position.X.Scale * viewport.X + position.X.Offset
+	local cy = position.Y.Scale * viewport.Y + position.Y.Offset
 	return UDim2.fromOffset(
-		math.clamp(position.X.Offset, r, math.max(viewport.X - r, r)),
-		math.clamp(position.Y.Offset, r, math.max(viewport.Y - r, r))
+		math.clamp(cx, r, math.max(viewport.X - r, r)),
+		math.clamp(cy, r, math.max(viewport.Y - r, r))
 	)
 end
 
@@ -593,6 +594,7 @@ local function makeDraggable(handle, target, connections, options)
 	options = options or {}
 	local dragging, moved, activeInput = false, false, nil
 	local startPointer = Vector2.zero
+	local lastPointer = Vector2.zero
 	local startPosition = target.Position
 	local didMoveThreshold = options.Threshold or (isMobile() and 7 or 5)
 	local moveConn, endConn
@@ -609,11 +611,22 @@ local function makeDraggable(handle, target, connections, options)
 		local isMove = input.UserInputType == Enum.UserInputType.MouseMovement
 			or (input.UserInputType == Enum.UserInputType.Touch and input == activeInput)
 		if not isMove then return end
-		local delta = Vector2.new(input.Position.X, input.Position.Y) - startPointer
-		if not moved and delta.Magnitude < didMoveThreshold then return end
-		moved = true
-		local newPosition = UDim2.new(startPosition.X.Scale, startPosition.X.Offset + delta.X,
-			startPosition.Y.Scale, startPosition.Y.Offset + delta.Y)
+		local currentPos = Vector2.new(input.Position.X, input.Position.Y)
+		local newPosition
+		if not moved then
+			local delta = currentPos - startPointer
+			if delta.Magnitude < didMoveThreshold then return end
+			moved = true
+			lastPointer = currentPos
+			newPosition = UDim2.new(startPosition.X.Scale, startPosition.X.Offset + delta.X,
+				startPosition.Y.Scale, startPosition.Y.Offset + delta.Y)
+		else
+			local step = currentPos - lastPointer
+			lastPointer = currentPos
+			local cur = target.Position
+			newPosition = UDim2.new(cur.X.Scale, cur.X.Offset + step.X,
+				cur.Y.Scale, cur.Y.Offset + step.Y)
+		end
 		if options.Clamp then newPosition = options.Clamp(newPosition) end
 		target.Position = newPosition
 	end
@@ -642,6 +655,7 @@ local function makeDraggable(handle, target, connections, options)
 		end
 		dragging = true; moved = false; activeInput = input
 		startPointer = Vector2.new(input.Position.X, input.Position.Y)
+		lastPointer = startPointer
 		startPosition = target.Position
 		moveConn = UserInputService.InputChanged:Connect(onMove)
 		endConn = UserInputService.InputEnded:Connect(onEnd)
@@ -4868,85 +4882,8 @@ function Window:LoadConfiguration(fileName, silent) return self:LoadConfig(fileN
 function Window:DeleteConfiguration(fileName) return self:DeleteConfig(fileName) end
 function Window:ListConfigurations() return self:ListConfigs() end
 
-function Window:_showDock(animate)
-	if not self._dock then return end
-	self._ball.Visible = false
-	self._dockShowToken = (self._dockShowToken or 0) + 1
-	self._dock.Position = self:_dockClamp(self._dock.Position, self._dockWide)
-	self._dock.Visible = true
-	if self._dockPulse then self._dockPulse:Cancel(); self._dockPulse = nil end
-	local showAnim = animate ~= false and not State.LowPerformance
-	if showAnim then
-		self._dockSphereScale.Scale = 0
-		tween(self._dockSphereScale, Anim.Normal + 0.06, { Scale = 1 }, Enum.EasingStyle.Back)
-		if self._dockPill then
-			if self._dockWide then
-				self._dockPill.Visible = true
-				self._dockPill.Active = true
-				self._dockPill.Size = UDim2.fromOffset(self._dockHeight, self._dockHeight)
-				self._dockPill.GroupTransparency = 1
-				local tok = self._dockShowToken
-				task.delay(0.12, function()
-					if self._state == "Destroyed" or self._dockShowToken ~= tok or not self._dockWide or not self._dock.Visible then return end
-					tween(self._dockPill, Anim.Slow, {
-						Size = UDim2.fromOffset(self._dockWidth, self._dockHeight),
-						GroupTransparency = 0,
-					}, Enum.EasingStyle.Back)
-				end)
-			else
-				self._dockPill.Visible = false
-				self._dockPill.Active = false
-			end
-		end
-	else
-		self._dockSphereScale.Scale = 1
-		if self._dockPill then
-			self._dockPill.Visible = self._dockWide == true
-			self._dockPill.Active = self._dockWide == true
-			self._dockPill.Size = UDim2.fromOffset(self._dockWide and self._dockWidth or self._dockHeight, self._dockHeight)
-			self._dockPill.GroupTransparency = self._dockWide and 0 or 1
-		end
-	end
-end
-
-function Window:_hideDock(animate)
-	if not self._dock then return end
-	self._dockShowToken = (self._dockShowToken or 0) + 1
-	local token = self._dockShowToken
-	if self._dockPulse then self._dockPulse:Cancel(); self._dockPulse = nil end
-	if animate == false or State.LowPerformance then
-		self._dockSphereScale.Scale = 0
-		if self._dockPill then
-			self._dockPill.Visible = false
-			self._dockPill.Active = false
-			self._dockPill.GroupTransparency = 1
-			self._dockPill.Size = UDim2.fromOffset(self._dockHeight, self._dockHeight)
-		end
-		self._dock.Visible = false
-		return
-	end
-	if self._dockPill and self._dockPill.Visible then
-		self._dockPill.Active = false
-		tween(self._dockPill, Anim.Fast, {
-			Size = UDim2.fromOffset(self._dockHeight, self._dockHeight),
-			GroupTransparency = 1,
-		}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-	end
-	tween(self._dockSphereScale, Anim.Fast, { Scale = 0 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-	task.delay(Anim.Fast + 0.03, function()
-		if self._state == "Destroyed" or self._dockShowToken ~= token then return end
-		if self._state ~= "Minimized" and self._state ~= "Minimizing" then
-			if self._dockPill then self._dockPill.Visible = false end
-			self._dock.Visible = false
-		end
-	end)
-end
-
 function Window:_showBall()
-	if self._dockActive then
-		self:_showDock(true)
-		return
-	end
+	self._ball.Position = clampBallPosition(self._ball.Position, self._metrics.Ball)
 	self._ball.Visible = true
 	self._ballScale.Scale = 0
 	tween(self._ballScale, Anim.Normal + 0.05, { Scale = 1 }, Enum.EasingStyle.Back)
@@ -4999,7 +4936,7 @@ function Window:Minimize()
 	end
 	self:_setState("Minimizing")
 	self:_closeDropdowns()
-	if self._dockActive then self._ball.Position = self:_dockCenter() end
+	self._ball.Position = clampBallPosition(self._ball.Position, self._metrics.Ball)
 	local duration = Anim.Normal + 0.1
 	tween(root, duration, {
 		Position = self._ball.Position, GroupTransparency = 1,
@@ -5025,14 +4962,12 @@ function Window:Restore()
 
 	local function settle()
 		if self._transition ~= token or self._state ~= "Restoring" then return end
-		if self._dockActive then self:_hideDock(false) end
 		self:_setState("Open")
 	end
 
 	if state == "Minimizing" then
 		-- minimizacao em andamento: o painel ainda esta visivel, so reverte
 		self:_setState("Restoring")
-		if self._dockActive then self:_hideDock(false) end
 		local size = self:_getSize()
 		tween(root, Anim.Slow, {
 			Position = clampWindowPosition(self._restorePosition or root.Position, size),
@@ -5044,16 +4979,11 @@ function Window:Restore()
 	end
 
 	self:_setState("Restoring")
-	local ballPosition = self._dockActive and self:_dockCenter() or self._ball.Position
-	if self._dockActive then
-		self:_hideDock(true)
-	else
-		tween(self._ballScale, Anim.Fast, { Scale = 0 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-	end
+	local ballPosition = clampBallPosition(self._ball.Position, self._metrics.Ball)
+	tween(self._ballScale, Anim.Fast, { Scale = 0 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
 
 	local function expand()
 		if self._transition ~= token or self._state ~= "Restoring" then return end
-		if self._dockActive then self:_hideDock(false) end
 		self._ball.Visible = false
 		local size = self:_getSize()
 		root.Size = size
@@ -5233,7 +5163,6 @@ function Window:Close(skipConfirm)
 	local wasHidden = not self._root.Visible
 	self._transition = (self._transition or 0) + 1
 	self:_setState("Closing")
-	if self._dockActive then self:_hideDock(false) end
 	safeCall(self._onClose)
 	if wasHidden then self:Destroy(); return end
 	tween(self._root, Anim.Normal, { GroupTransparency = 1 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
@@ -5244,7 +5173,6 @@ end
 function Window:Destroy()
 	if self._state == "Destroyed" then return end
 	self._state = "Destroyed"
-	if self._dockActive then self:_hideDock(false) end
 	for index, window in ipairs(Windows) do
 		if window == self then table.remove(Windows, index); break end
 	end
@@ -5252,7 +5180,6 @@ function Window:Destroy()
 	table.clear(self._connections)
 	if self._cameraConnection then self._cameraConnection:Disconnect(); self._cameraConnection = nil end
 	if self._pulse then self._pulse:Cancel(); self._pulse = nil end
-	if self._dockPulse then self._dockPulse:Cancel(); self._dockPulse = nil end
 	if self._confirmLayer then self._confirmLayer:Destroy(); self._confirmLayer = nil end
 	if self._gui then
 		cancelTweensUnder(self._gui)
@@ -5264,7 +5191,6 @@ function Window:_onViewportChanged()
 	if self._state == "Destroyed" then return end
 	if self._state == "Open" then self:_resize(true) end
 	self._ball.Position = clampBallPosition(self._ball.Position, self._metrics.Ball)
-	self:_dockReclamp()
 end
 
 function Window:_bindCamera()
@@ -5296,454 +5222,6 @@ function AetherUI.SetLowPerformance(first, second)
 	for _, window in ipairs(Windows) do window:_applyPerformance() end
 end
 function AetherUI.GetLowPerformance() return State.LowPerformance end
-
-local DOCK_HOLD_TIME = 1.5
-
-local function pointInFrame(frame, point, pad)
-	pad = pad or 0
-	local position, size = frame.AbsolutePosition, frame.AbsoluteSize
-	return point.X >= position.X - pad and point.X <= position.X + size.X + pad
-		and point.Y >= position.Y - pad and point.Y <= position.Y + size.Y + pad
-end
-
-function Window:_dockCenter()
-	if self._dock and self._dock.Visible and self._dockSphere then
-		local sphere = self._dockSphere
-		local center = sphere.AbsolutePosition + sphere.AbsoluteSize / 2
-		return UDim2.fromOffset(center.X, center.Y)
-	end
-	local dock = self._dock
-	local pos = (dock and dock.Position) or DockMemory.Position or UDim2.new(0.5, 0, 0, self._metrics.Mobile and 14 or 12)
-	local viewport = getViewport()
-	local cx = pos.X.Scale * viewport.X + pos.X.Offset
-	local cy = pos.Y.Scale * viewport.Y + pos.Y.Offset + (self._dockSphereSize or 54) / 2
-	return UDim2.fromOffset(cx, cy)
-end
-
-function Window:_dockClamp(position, wide)
-	local viewport = getViewport()
-	local width = wide and self._dockWidth or self._dockSphereSize
-	local height = self._dockSphereSize
-	local topY = math.max(6, getGuiInset().Y + 2)
-	local cx = position.X.Scale * viewport.X + position.X.Offset
-	local nx = math.clamp(cx, width / 2 + 8, viewport.X - width / 2 - 8)
-	return UDim2.new(0.5, nx - viewport.X / 2, 0, topY)
-end
-
-function Window:_dockReclamp()
-	if not self._dock then return end
-	self._dock.Position = self:_dockClamp(self._dock.Position, self._dockWide)
-	DockMemory.Position = self._dock.Position
-end
-
-function Window:_dockToggleWindow()
-	local now = os.clock()
-	if now - (self._lastToggle or 0) < 0.18 then return end -- anti toque duplo
-	self._lastToggle = now
-	local state = self._state
-	if state == "Minimized" or state == "Minimizing" then
-		self:Restore()
-	elseif state == "Open" or state == "Opening" or state == "Restoring" then
-		self:Minimize()
-	end
-end
-
-function Window:_buildDock(config)
-	local m = self._metrics
-	local mobile = m.Mobile
-	local height = mobile and 46 or 42
-	local sphereSize = height + (mobile and 16 or 14)
-	local width = mobile and 236 or 252
-	local sideWidth = (width - sphereSize) / 2
-	local slotSize = mobile and 34 or 30
-	local iconSize = mobile and 17 or 16
-	local pillShown = DockMemory.Hidden ~= true
-
-	self._dockWidth = width
-	self._dockHeight = height
-	self._dockSphereSize = sphereSize
-	self._dockWide = pillShown
-	self._dockActive = true
-	self._dockShowToken = 0
-
-	-- Dock comeca oculto; aparece apenas quando o painel principal esta minimizado.
-	local defaultDockY = mobile and math.max(14, getGuiInset().Y + 6) or 12
-	local dock = create("Frame", {
-		Name = "Dock", AnchorPoint = Vector2.new(0.5, 0),
-		Position = DockMemory.Position or UDim2.new(0.5, 0, 0, defaultDockY),
-		Size = UDim2.fromOffset(width, sphereSize),
-		BackgroundTransparency = 1, Active = false, Visible = false,
-		ZIndex = 2, Parent = self._gui,
-	})
-	self._dock = dock
-
-	local pill = create("CanvasGroup", {
-		Name = "Pill", AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(height, height),
-		BackgroundColor3 = Theme.Background, BackgroundTransparency = 0.3,
-		GroupTransparency = 1, Visible = false,
-		Active = false, ZIndex = 1, Parent = dock,
-	})
-	self._dockPill = pill
-	addCornerScale(pill, 0.5)
-	local pillStroke = addStroke(pill, Theme.White, 0.55, 1)
-	create("UIGradient", {
-		Rotation = 90,
-		Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0),
-			NumberSequenceKeypoint.new(1, 0.7),
-		}),
-		Parent = pillStroke,
-	})
-	attachShadow(pill, dock, math.floor(height / 2), nil, self._connections)
-
-	local inner = create("Frame", {
-		Name = "Inner", AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(width, height),
-		BackgroundTransparency = 1, Active = false, Parent = pill,
-	})
-	local sheen = create("Frame", {
-		Name = "Sheen", BackgroundColor3 = Theme.White,
-		Size = UDim2.fromScale(1, 1), Active = false, Parent = inner,
-	})
-	create("UIGradient", {
-		Rotation = 90,
-		Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.86),
-			NumberSequenceKeypoint.new(0.55, 0.97),
-			NumberSequenceKeypoint.new(1, 1),
-		}),
-		Parent = sheen,
-	})
-
-	local slots = {}
-
-	local function refreshStarSlot()
-		for _, slot in ipairs(slots) do
-			if slot.Name == "star" then
-				slot.Icon:Tween(self._starsOn and accentLight() or Theme.SubText, Anim.Fast)
-			end
-		end
-	end
-
-	local function runAfterOpen(fn)
-		if self._state == "Minimized" or self._state == "Minimizing" then
-			self:Restore()
-			local delayWait = State.LowPerformance and 0.03 or (Anim.Fast + Anim.Slow + 0.08)
-			task.delay(delayWait, function()
-				if self._state == "Destroyed" then return end
-				safeCall(fn)
-			end)
-			return
-		end
-		if self._state == "Open" then safeCall(fn) end
-	end
-
-	local slotDefs = {
-		{ Icon = "menu", X = sideWidth * 0.3, Action = function()
-			runAfterOpen(function() self:ToggleSidebar() end)
-		end },
-		{ Icon = "star", X = sideWidth * 0.72, Action = function()
-			runAfterOpen(function()
-				self:ToggleFavoritesMode()
-				refreshStarSlot()
-			end)
-		end },
-		{ Icon = "search", X = width - sideWidth * 0.72, Action = function()
-			runAfterOpen(function()
-				if self._searchBox then self._searchBox:CaptureFocus() end
-			end)
-		end },
-		{ Icon = "settings", X = width - sideWidth * 0.3, Action = function()
-			runAfterOpen(function()
-				if self._settingsTab then self:SelectTab(self._settingsTab) end
-			end)
-		end },
-	}
-
-	for _, def in ipairs(slotDefs) do
-		local frame = create("Frame", {
-			Name = def.Icon, AnchorPoint = Vector2.new(0.5, 0.5),
-			Position = UDim2.new(0, def.X, 0.5, 0),
-			Size = UDim2.fromOffset(slotSize, slotSize),
-			BackgroundColor3 = Theme.White, BackgroundTransparency = 1,
-			Active = false, Parent = inner,
-		})
-		addCornerScale(frame, 0.5)
-		local icon = createIcon(def.Icon, frame, iconSize, Theme.SubText)
-		icon.Instance.AnchorPoint = Vector2.new(0.5, 0.5)
-		icon.Instance.Position = UDim2.fromScale(0.5, 0.5)
-		table.insert(slots, { Frame = frame, Icon = icon, Action = def.Action, Name = def.Icon })
-	end
-
-	local sphere = create("TextButton", {
-		Name = "Sphere", AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(sphereSize, sphereSize),
-		BackgroundColor3 = Theme.Black, BackgroundTransparency = 0.12,
-		AutoButtonColor = false, Text = "",
-		Active = true, ZIndex = 5, Parent = dock,
-	})
-	addCornerScale(sphere, 0.5)
-	local sphereStroke = addStroke(sphere, accentLight(), 0.4, 1.5)
-	local sphereScale = create("UIScale", { Scale = 0, Parent = sphere })
-	self._dockSphereScale = sphereScale
-	local sphereGloss = create("Frame", {
-		Name = "Gloss", BackgroundColor3 = Theme.White,
-		Size = UDim2.fromScale(1, 1), Active = false, ZIndex = 6, Parent = sphere,
-	})
-	addCornerScale(sphereGloss, 0.5)
-	create("UIGradient", {
-		Rotation = 90,
-		Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.84),
-			NumberSequenceKeypoint.new(0.6, 1),
-			NumberSequenceKeypoint.new(1, 1),
-		}),
-		Parent = sphereGloss,
-	})
-	local sphereIcon = create("ImageLabel", {
-		Name = "Logo", AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromScale(0.62, 0.62), BackgroundTransparency = 1,
-		Image = Assets.Logo, ImageColor3 = accentLight(),
-		ScaleType = Enum.ScaleType.Fit, Active = false, ZIndex = 7, Parent = sphere,
-	})
-	self._dockSphere = sphere
-
-	dock.Position = self:_dockClamp(dock.Position, pillShown)
-	DockMemory.Position = dock.Position
-
-	local function setPill(visible)
-		if pillShown == visible or self._state == "Destroyed" then return end
-		pillShown = visible
-		self._dockWide = visible
-		DockMemory.Hidden = not visible
-		if visible then
-			local target = self:_dockClamp(dock.Position, true)
-			if target ~= dock.Position then
-				tween(dock, Anim.Smooth, { Position = target })
-			end
-			DockMemory.Position = target
-			pill.Visible = true
-			pill.Active = true
-			tween(pill, Anim.Slow, {
-				Size = UDim2.fromOffset(width, height), GroupTransparency = 0,
-			}, Enum.EasingStyle.Back)
-		else
-			pill.Active = false
-			local t = tween(pill, Anim.Smooth, {
-				Size = UDim2.fromOffset(height, height), GroupTransparency = 1,
-			}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-			t.Completed:Connect(function(playbackState)
-				if playbackState == Enum.PlaybackState.Completed and not pillShown then
-					pill.Visible = false
-				end
-			end)
-		end
-	end
-
-	local dragging, moved, holdFired, startedOnSphere = false, false, false, false
-	local activeInput, holdToken, holdTween, pressedSlot, dockOffset = nil, nil, nil, nil, nil
-	local lastBlockedActivated = 0
-	local startPointer, startPosition = Vector2.zero, dock.Position
-	local dragThreshold = mobile and 12 or 6
-
-	local function slotRest(slot)
-		if slot.Name == "star" and self._starsOn then return accentLight() end
-		return Theme.SubText
-	end
-
-	local function setPressed(slot)
-		if pressedSlot == slot then return end
-		if pressedSlot then
-			tween(pressedSlot.Frame, Anim.Fast, { BackgroundTransparency = 1 })
-			pressedSlot.Icon:Tween(slotRest(pressedSlot), Anim.Fast)
-		end
-		pressedSlot = slot
-		if slot then
-			tween(slot.Frame, Anim.Micro, { BackgroundTransparency = 0.86 })
-			slot.Icon:Tween(Theme.Text, Anim.Micro)
-		end
-	end
-
-	local function findSlot(rawPoint, forcedOffset)
-		if not pillShown then return nil end
-		local pad = mobile and 6 or 3
-		local inset = getGuiInset()
-		local candidates = {}
-		if forcedOffset ~= nil then table.insert(candidates, rawPoint + forcedOffset) end
-		table.insert(candidates, rawPoint)
-		if inset.Magnitude > 0 then table.insert(candidates, rawPoint + inset) end
-		for _, pt in ipairs(candidates) do
-			for _, slot in ipairs(slots) do
-				if pointInFrame(slot.Frame, pt, pad) then return slot end
-			end
-		end
-		return nil
-	end
-
-	local function cancelHold()
-		holdToken = nil
-		if holdTween then holdTween:Cancel(); holdTween = nil end
-		tween(sphereScale, Anim.Fast, { Scale = 1 }, Enum.EasingStyle.Back)
-	end
-
-	local onDockMoved, onDockEnded, trackDock, untrackDock
-
-	local function onBeganFrom(source, input)
-		if not isPointer(input) then return end
-		if dragging then
-			if activeInput and activeInput.UserInputState ~= Enum.UserInputState.End then return end
-			untrackDock()
-		end
-		dragging = true
-		moved = false
-		holdFired = false
-		startedOnSphere = source == "sphere"
-		activeInput = input
-		dockOffset = detectPointerOffset(input, startedOnSphere and sphere or pill)
-		trackDock()
-		startPointer = Vector2.new(input.Position.X, input.Position.Y)
-		startPosition = dock.Position
-		setPressed(startedOnSphere and nil or findSlot(startPointer, dockOffset))
-		local token = {}
-		holdToken = token
-		if holdTween then holdTween:Cancel() end
-		holdTween = tween(sphereScale, DOCK_HOLD_TIME, { Scale = 0.9 }, Enum.EasingStyle.Linear)
-		task.delay(DOCK_HOLD_TIME, function()
-			if holdToken ~= token or not dragging or moved or self._state == "Destroyed" then return end
-			holdFired = true
-			lastBlockedActivated = os.clock()
-			holdToken = nil
-			holdTween = nil
-			setPressed(nil)
-			setPill(not pillShown)
-			sphereScale.Scale = 1.12
-			tween(sphereScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
-		end)
-	end
-
-	sphere.InputBegan:Connect(function(input)
-		if not isPointer(input) then return end
-		onBeganFrom("sphere", input)
-	end)
-	sphere.Activated:Connect(function()
-		if dragging or moved or holdFired or (os.clock() - lastBlockedActivated < 0.35) then
-			return
-		end
-		self:_dockToggleWindow()
-	end)
-	pill.InputBegan:Connect(function(input) onBeganFrom("pill", input) end)
-
-	sphere.MouseEnter:Connect(function()
-		if not dragging then tween(sphereScale, Anim.Fast, { Scale = 1.06 }) end
-	end)
-	sphere.MouseLeave:Connect(function()
-		if not dragging then tween(sphereScale, Anim.Fast, { Scale = 1 }) end
-	end)
-
-	function onDockMoved(input)
-		if not dragging or holdFired then return end
-		local isMove = input.UserInputType == Enum.UserInputType.MouseMovement
-			or (input.UserInputType == Enum.UserInputType.Touch and input == activeInput)
-		if not isMove then return end
-		local currentPos = Vector2.new(input.Position.X, input.Position.Y)
-		local totalDelta = currentPos - startPointer
-		local deadzone = mobile and 7 or 5
-		if not moved then
-			if totalDelta.Magnitude < deadzone then return end
-			moved = true
-			lastBlockedActivated = os.clock()
-			cancelHold()
-			setPressed(nil)
-		else
-			lastBlockedActivated = os.clock()
-		end
-		local nextPosition = UDim2.new(
-			startPosition.X.Scale, startPosition.X.Offset + totalDelta.X,
-			startPosition.Y.Scale, startPosition.Y.Offset + totalDelta.Y
-		)
-		dock.Position = self:_dockClamp(nextPosition, pillShown)
-	end
-
-	function onDockEnded(input)
-		if not dragging or not activeInput then return end
-		local same = input == activeInput
-			or (input.UserInputType == Enum.UserInputType.MouseButton1
-				and activeInput.UserInputType == Enum.UserInputType.MouseButton1)
-			or (input.UserInputType == Enum.UserInputType.Touch
-				and activeInput.UserInputState == Enum.UserInputState.End)
-		if not same then return end
-		untrackDock()
-		dragging = false
-		activeInput = nil
-		local wasMoved, wasHold, fromSphere = moved, holdFired, startedOnSphere
-		local slot = pressedSlot
-		local savedOffset = dockOffset
-		startedOnSphere = false
-		dockOffset = nil
-		setPressed(nil)
-		if holdToken then cancelHold() end
-		if wasMoved then
-			lastBlockedActivated = os.clock()
-			DockMemory.Position = dock.Position
-			return
-		end
-		if wasHold then
-			lastBlockedActivated = os.clock()
-			return
-		end
-		if fromSphere then
-			self:_dockToggleWindow()
-			return
-		end
-		local raw = Vector2.new(input.Position.X, input.Position.Y)
-		local inset = getGuiInset()
-		local center = sphere.AbsolutePosition + sphere.AbsoluteSize / 2
-		local radius = math.max(sphere.AbsoluteSize.X, sphere.AbsoluteSize.Y) / 2 + (mobile and 12 or 6)
-		local pos, size = sphere.AbsolutePosition, sphere.AbsoluteSize
-		local function inBounds(pt)
-			return pt.X >= pos.X - 6 and pt.X <= pos.X + size.X + 6
-				and pt.Y >= pos.Y - 6 and pt.Y <= pos.Y + size.Y + 6
-		end
-		local hitSphere = inBounds(raw) or (savedOffset and inBounds(raw + savedOffset)) or (inset.Magnitude > 0 and inBounds(raw + inset))
-		if not hitSphere then
-			local minDist = (pointerPosition(input, savedOffset) - center).Magnitude
-			minDist = math.min(minDist, (raw - center).Magnitude)
-			if inset.Magnitude > 0 then
-				minDist = math.min(minDist, ((raw + inset) - center).Magnitude)
-			end
-			hitSphere = minDist <= radius
-		end
-		if hitSphere then
-			self:_dockToggleWindow()
-			return
-		end
-		local hit = findSlot(raw, savedOffset)
-		if hit and (hit == slot or slot == nil) then safeCall(hit.Action) end
-	end
-
-	local dockMoveConn, dockEndConn
-	function untrackDock()
-		if dockMoveConn then dockMoveConn:Disconnect(); dockMoveConn = nil end
-		if dockEndConn then dockEndConn:Disconnect(); dockEndConn = nil end
-	end
-	function trackDock()
-		untrackDock()
-		dockMoveConn = UserInputService.InputChanged:Connect(onDockMoved)
-		dockEndConn = UserInputService.InputEnded:Connect(onDockEnded)
-	end
-	table.insert(self._connections, { Disconnect = untrackDock })
-
-	self:_onAccent(function(animate)
-		sphereIcon.ImageColor3 = accentLight()
-		sphereStroke.Color = accentLight()
-		refreshStarSlot()
-	end)
-end
 
 function AetherUI.CreateWindow(config)
 	config = config or {}
@@ -6273,7 +5751,10 @@ function AetherUI.CreateWindow(config)
 	local viewport = getViewport()
 	local ball = create("TextButton", {
 		Name = "Ball", AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = clampBallPosition(UDim2.fromOffset(44, math.floor(viewport.Y * 0.3)), m.Ball),
+		Position = clampBallPosition(
+			UDim2.fromOffset(math.floor(viewport.X * 0.5), math.max(math.floor(m.Ball / 2 + 8), getGuiInset().Y + math.floor(m.Ball / 2 + 6))),
+			m.Ball
+		),
 		Size = UDim2.fromOffset(m.Ball, m.Ball),
 		BackgroundColor3 = Theme.Black, BackgroundTransparency = Glass.Ball, AutoButtonColor = false,
 		Text = "", Visible = false, Parent = gui,
@@ -6334,7 +5815,6 @@ function AetherUI.CreateWindow(config)
 	self:_applyLayout(false)
 	self:_applyPerformance()
 	self:_applyStarsMode(false)
-	if config.Dock == true then self:_buildDock(config) end
 
 	-- Reposiciona as estrelas dos componentes (rolagem, expansao, resize).
 	-- Estrelas: Heartbeat so existe enquanto o modo estrela esta ativo (ou na
