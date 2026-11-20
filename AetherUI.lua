@@ -67,26 +67,28 @@ local Tab = {}
 Tab.__index = Tab
 
 local Theme = {
-	Background = Color3.fromRGB(11, 11, 14),
-	BackgroundDeep = Color3.fromRGB(8, 8, 11),
-	Sidebar = Color3.fromRGB(15, 15, 19),
-	Surface = Color3.fromRGB(19, 19, 24),
-	SurfaceHigh = Color3.fromRGB(23, 23, 29),
-	Element = Color3.fromRGB(26, 26, 32),
-	ElementHigh = Color3.fromRGB(31, 31, 38),
-	ElementHover = Color3.fromRGB(36, 36, 44),
-	Off = Color3.fromRGB(48, 48, 57),
-	OffDeep = Color3.fromRGB(38, 38, 46),
-	Stroke = Color3.fromRGB(42, 42, 52),
-	StrokeSoft = Color3.fromRGB(34, 34, 42),
-	Divider = Color3.fromRGB(27, 27, 34),
-	Text = Color3.fromRGB(240, 240, 245),
-	SubText = Color3.fromRGB(152, 152, 166),
-	Muted = Color3.fromRGB(100, 100, 114),
-	Danger = Color3.fromRGB(235, 87, 87),
-	DangerSoft = Color3.fromRGB(160, 60, 60),
-	Success = Color3.fromRGB(72, 199, 128),
-	Warning = Color3.fromRGB(240, 178, 64),
+	Background = Color3.fromRGB(14, 14, 18),
+	BackgroundDeep = Color3.fromRGB(10, 10, 13),
+	Sidebar = Color3.fromRGB(17, 17, 22),
+	Surface = Color3.fromRGB(22, 22, 28),
+	SurfaceHigh = Color3.fromRGB(27, 27, 34),
+	Element = Color3.fromRGB(24, 24, 31),
+	ElementHigh = Color3.fromRGB(30, 30, 39),
+	ElementHover = Color3.fromRGB(33, 33, 43),
+	ElementPressed = Color3.fromRGB(39, 39, 50),
+	Off = Color3.fromRGB(54, 54, 67),
+	OffDeep = Color3.fromRGB(32, 32, 41),
+	Stroke = Color3.fromRGB(44, 44, 56),
+	StrokeSoft = Color3.fromRGB(34, 34, 44),
+	StrokeStrong = Color3.fromRGB(58, 58, 72),
+	Divider = Color3.fromRGB(30, 30, 38),
+	Text = Color3.fromRGB(244, 244, 248),
+	SubText = Color3.fromRGB(162, 164, 178),
+	Muted = Color3.fromRGB(106, 108, 124),
+	Danger = Color3.fromRGB(229, 72, 77),
+	DangerSoft = Color3.fromRGB(148, 52, 56),
+	Success = Color3.fromRGB(62, 188, 120),
+	Warning = Color3.fromRGB(235, 173, 58),
 	White = Color3.fromRGB(255, 255, 255),
 	Black = Color3.fromRGB(0, 0, 0),
 	Shadow = Color3.fromRGB(0, 0, 0),
@@ -95,14 +97,23 @@ local Theme = {
 	FontBlack = Enum.Font.GothamBlack,
 }
 
-local Anim = {
-	Micro = 0.08, Fast = 0.15, Normal = 0.25,
-	Smooth = 0.32, Slow = 0.42, Spring = 0.38,
+local Radius = {
+	Window = 12,
+	Popup = 10,
+	Card = 8,
+	Control = 6,
+	Small = 4,
 }
 
+local Anim = {
+	Micro = 0.08, Fast = 0.14, Normal = 0.22,
+	Smooth = 0.26, Slow = 0.32, Spring = 0.28,
+}
+
+-- Superficies 100% solidas e opacas (Premium Dark sem glassmorphism)
 local Glass = {
-	Window = 0.16, Bar = 0.4, Side = 0.5, Element = 0.45,
-	Panel = 0.2, Popup = 0.1, Card = 0.1, Ball = 0.1,
+	Window = 0, Bar = 0, Side = 0, Element = 0,
+	Panel = 0, Popup = 0, Card = 0, Ball = 0,
 }
 
 local State = {
@@ -125,10 +136,12 @@ local Assets = {
 }
 
 local function accent() return State.Accent end
-local function accentDeep() return State.Accent:Lerp(Theme.Black, 0.35) end
-local function accentLight() return State.Accent:Lerp(Theme.White, 0.3) end
-local function accentSoft(amount) return Theme.Element:Lerp(State.Accent, amount or 0.14) end
-local function accentGlow() return State.Accent:Lerp(Theme.White, 0.15) end
+local function accentDeep() return State.Accent:Lerp(Theme.Black, 0.38) end
+local function accentLight() return State.Accent:Lerp(Theme.White, 0.24) end
+local function accentSoft(amount) return Theme.Element:Lerp(State.Accent, amount or 0.12) end
+local function accentSurface(amount) return Theme.Surface:Lerp(State.Accent, amount or 0.12) end
+local function accentBorder(amount) return Theme.Stroke:Lerp(State.Accent, amount or 0.45) end
+local function accentGlow() return State.Accent:Lerp(Theme.White, 0.12) end
 
 local function create(className, props, children)
 	local instance = Instance.new(className)
@@ -2231,8 +2244,7 @@ local function addGradient(parent, sequence, rotation)
 end
 
 local ShadowLayers = {
-	{ Grow = 2, Alpha = 0.9 }, { Grow = 6, Alpha = 0.93 },
-	{ Grow = 12, Alpha = 0.96 }, { Grow = 22, Alpha = 0.98 },
+	{ Grow = 1, Alpha = 0.78 }, { Grow = 5, Alpha = 0.88 }, { Grow = 12, Alpha = 0.94 },
 }
 
 local function attachShadow(target, parent, corner, scaleObject, connections)
@@ -2259,7 +2271,7 @@ local function attachShadow(target, parent, corner, scaleObject, connections)
 		if container.Visible ~= visible then container.Visible = visible end
 		if not visible then return end
 		local position = target.Position
-		container.Position = UDim2.new(position.X.Scale, position.X.Offset, position.Y.Scale, position.Y.Offset + 6)
+		container.Position = UDim2.new(position.X.Scale, position.X.Offset, position.Y.Scale, position.Y.Offset + 4)
 		container.Size = target.Size
 		if containerScale then containerScale.Scale = scaleObject.Scale end
 		local groupTransparency = target.GroupTransparency
@@ -3124,22 +3136,6 @@ function AetherUI.GetIcons()
 	return names
 end
 
-local function spawnRipple(parent, position, color, sizeLimit)
-	if State.LowPerformance then return end
-	local ripple = create("Frame", {
-		Name = "Ripple", AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = position, Size = UDim2.fromOffset(0, 0),
-		BackgroundColor3 = color or Theme.White, BackgroundTransparency = 0.72,
-		ZIndex = 3, Parent = parent,
-	})
-	addCornerScale(ripple, 0.5)
-	local limit = sizeLimit or 200
-	local t = tween(ripple, Anim.Slow, {
-		Size = UDim2.fromOffset(limit, limit), BackgroundTransparency = 1,
-	})
-	t.Completed:Connect(function() ripple:Destroy() end)
-end
-
 -- "Pop" suave quando o texto de um rotulo de valor muda (slider/dropdown).
 local function attachValuePop(label, strength, throttle)
 	local scale = create("UIScale", { Parent = label })
@@ -3254,44 +3250,28 @@ function AetherUI.Notify(first, second)
 		Parent = Notifications.Holder,
 	})
 	local card = create("CanvasGroup", {
-		Name = "Card", BackgroundColor3 = Theme.Surface, BackgroundTransparency = Glass.Card,
-		Position = UDim2.fromOffset(animated and 44 or 0, 0),
+		Name = "Card", BackgroundColor3 = Theme.Surface, BackgroundTransparency = 0,
+		Position = UDim2.fromOffset(animated and 28 or 0, 0),
 		Size = UDim2.new(1, 0, 0, height),
 		GroupTransparency = animated and 1 or 0, Parent = slot,
 	})
-	local cardScale = create("UIScale", { Scale = animated and 0.9 or 1, Parent = card })
-	addCorner(card, 12)
-	addStroke(card, Theme.Stroke, 0.35, 1)
-	attachShadow(card, slot, 12, cardScale)
-
-	local bar = create("Frame", {
-		Name = "Accent", Size = UDim2.new(0, 2, 1, 0),
-		BackgroundColor3 = color, BackgroundTransparency = 0.25, Parent = card,
-	})
-	addGradient(bar, NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.1),
-		NumberSequenceKeypoint.new(1, 0.7),
-	}), 90)
+	local cardScale = create("UIScale", { Scale = animated and 0.96 or 1, Parent = card })
+	addCorner(card, Radius.Popup)
+	addStroke(card, Theme.Stroke, 0, 1)
+	attachShadow(card, slot, Radius.Popup, cardScale)
 
 	if iconSpec ~= nil and iconSpec ~= "" and iconSpec ~= false then
 		local badge = create("Frame", {
-			Name = "Badge", Position = UDim2.fromOffset(12, 12),
+			Name = "Badge", Position = UDim2.fromOffset(12, 13),
 			Size = UDim2.fromOffset(26, 26),
-			BackgroundColor3 = Theme.Surface:Lerp(color, 0.16), Parent = card,
+			BackgroundColor3 = Theme.Surface:Lerp(color, 0.14), Parent = card,
 		})
-		addCorner(badge, 8)
-		local icon = createIcon(iconSpec, badge, 15, color, { Size = config.IconSize, Color = config.IconColor })
+		addCorner(badge, Radius.Control)
+		addStroke(badge, Theme.Stroke:Lerp(color, 0.42), 0, 1)
+		local icon = createIcon(iconSpec, badge, 14, color, { Size = config.IconSize, Color = config.IconColor })
 		if icon then
 			icon.Instance.AnchorPoint = Vector2.new(0.5, 0.5)
 			icon.Instance.Position = UDim2.fromScale(0.5, 0.5)
-			if animated then
-				local badgeScale = create("UIScale", { Scale = 0, Parent = badge })
-				task.delay(0.1, function()
-					if badge.Parent then
-						tween(badgeScale, Anim.Spring + 0.1, { Scale = 1 }, Enum.EasingStyle.Back)
-					end
-				end)
-			end
 		else badge:Destroy() end
 	end
 
@@ -3325,7 +3305,7 @@ function AetherUI.Notify(first, second)
 		progress = create("Frame", {
 			Name = "Progress", AnchorPoint = Vector2.new(0, 1),
 			Position = UDim2.new(0, 0, 1, 0), Size = UDim2.new(1, 0, 0, 2),
-			BackgroundColor3 = color, BackgroundTransparency = 0.55, Parent = card,
+			BackgroundColor3 = color, BackgroundTransparency = 0.2, Parent = card,
 		})
 	end
 
@@ -3348,10 +3328,10 @@ function AetherUI.Notify(first, second)
 			return
 		end
 		local out = tween(card, Anim.Normal, {
-			Position = UDim2.fromOffset(44, 0),
+			Position = UDim2.fromOffset(28, 0),
 			GroupTransparency = 1,
 		}, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-		tween(cardScale, Anim.Normal, { Scale = 0.9 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+		tween(cardScale, Anim.Normal, { Scale = 0.96 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
 		out.Completed:Connect(function()
 			local shrink = tween(slot, Anim.Fast, { Size = UDim2.new(1, 0, 0, 0) })
 			shrink.Completed:Connect(function() slot:Destroy() end)
@@ -3372,12 +3352,8 @@ function AetherUI.Notify(first, second)
 		overlay.MouseLeave:Connect(function() closeIcon:Tween(Theme.Muted, Anim.Fast) end)
 	end
 	tween(slot, Anim.Normal, { Size = UDim2.new(1, 0, 0, height) })
-	tween(card, Anim.Slow, { Position = UDim2.fromOffset(0, 0), GroupTransparency = 0 })
-	tween(cardScale, Anim.Slow, { Scale = 1 }, Enum.EasingStyle.Back)
-	if animated then
-		bar.Size = UDim2.new(0, 2, 0, 0)
-		tween(bar, Anim.Slow, { Size = UDim2.new(0, 2, 1, 0) })
-	end
+	tween(card, Anim.Normal, { Position = UDim2.fromOffset(0, 0), GroupTransparency = 0 })
+	tween(cardScale, Anim.Normal, { Scale = 1 })
 	if progress then
 		tween(progress, duration, { Size = UDim2.new(0, 0, 0, 2) }, Enum.EasingStyle.Linear)
 	end
@@ -3467,57 +3443,53 @@ function Tab:AddSection(config)
 		Name = "Section", LayoutOrder = self:_nextOrder(),
 		Size = UDim2.new(1, 0, 0, 24), BackgroundTransparency = 1, Parent = self._page,
 	})
-	local icon = createIcon(iconSpec, holder, m.Icon - 2, Theme.SubText, { Size = iconSize, Color = iconColor })
-	local bar, barGradient = nil, nil
+	local icon = createIcon(iconSpec, holder, m.Icon - 3, Theme.Muted, { Size = iconSize, Color = iconColor })
 	if icon then
 		icon.Instance.AnchorPoint = Vector2.new(0, 0.5)
-		icon.Instance.Position = UDim2.new(0, 4, 0.5, 0)
-	else
-		bar = create("Frame", {
-			Name = "Bar", AnchorPoint = Vector2.new(0, 0.5),
-			Position = UDim2.new(0, 4, 0.5, 0),
-			Size = UDim2.fromOffset(3, 12),
-			BackgroundColor3 = accent(), Parent = holder,
-		})
-		addCornerScale(bar, 0.5)
-		barGradient = addGradient(bar, NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.15),
-			NumberSequenceKeypoint.new(1, 0.65),
-		}), 90)
-		table.insert(win._gradients, barGradient)
+		icon.Instance.Position = UDim2.new(0, 2, 0.5, 0)
 	end
+	local rawText = tostring(text or "Section")
 	local label = create("TextLabel", {
 		Name = "Label", BackgroundTransparency = 1,
-		Text = string.upper(tostring(text or "Section")),
-		Font = Theme.FontBold, TextSize = m.Text - 2,
+		Text = string.upper(rawText),
+		Font = Theme.FontBold, TextSize = math.max(10, m.Text - 3),
 		TextColor3 = Theme.SubText, TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd, Parent = holder,
 	})
+	local hline = create("Frame", {
+		Name = "Line", AnchorPoint = Vector2.new(0, 0.5),
+		BackgroundColor3 = Theme.Divider, Size = UDim2.new(1, 0, 0, 1),
+		Parent = holder,
+	})
 	local function layout()
 		holder.Size = UDim2.new(1, 0, 0, m.Compact and 22 or 26)
-		label.TextSize = m.Text - 2
-		local offsetX = 14
+		local ts = math.max(10, m.Text - 3)
+		label.TextSize = ts
+		local offsetX = 2
 		if icon then
-			local sz = iconSizeOf(icon, m.Icon - 2)
+			local sz = iconSizeOf(icon, m.Icon - 3)
 			icon:SetSize(sz)
-			offsetX = 4 + sz + 8
-		elseif bar then
-			bar.Size = UDim2.fromOffset(3, m.Compact and 10 or 12)
+			offsetX = 2 + sz + 7
 		end
 		label.Position = UDim2.fromOffset(offsetX, 0)
 		label.Size = UDim2.new(1, -offsetX, 1, 0)
+		local textW = 64
+		local ok, bounds = pcall(function()
+			return TextService:GetTextSize(label.Text, ts, Theme.FontBold, Vector2.new(1000, 32))
+		end)
+		if ok and bounds then textW = math.ceil(bounds.X) end
+		local lineX = offsetX + textW + 10
+		hline.Position = UDim2.new(0, lineX, 0.5, 0)
+		hline.Size = UDim2.new(1, -lineX, 0, 1)
 	end
 	win:_onLayout(layout)
-	win:_onAccent(function(animate)
-		if bar then setProps(bar, { BackgroundColor3 = accent() }, animate) end
-	end)
 	local object = { Instance = holder }
-	local rawText = tostring(text or "Section")
 	local entry = self:_register("Section", holder, function() return rawText end)
 	self._currentSection = entry
 	function object:SetText(newText)
 		rawText = tostring(newText)
 		label.Text = string.upper(rawText)
+		layout()
 	end
 	function object:Set(newText) object:SetText(newText) end
 	function object:Get() return rawText end
@@ -3532,15 +3504,15 @@ function Tab:AddLabel(config)
 	local label = create("TextLabel", {
 		Name = "Label", LayoutOrder = self:_nextOrder(),
 		Size = UDim2.new(1, 0, 0, m.Row - 4),
-		BackgroundColor3 = Theme.Surface, BackgroundTransparency = Glass.Element,
+		BackgroundColor3 = Theme.Surface, BackgroundTransparency = 0,
 		Text = tostring(config.Text or config.Name or "Label"),
 		Font = Theme.Font, TextSize = m.Text,
 		TextColor3 = Theme.SubText, TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd, Parent = self._page,
 	})
-	addCorner(label, 10)
+	addCorner(label, Radius.Card)
 	local padding = addPadding(label, 12, 0, 12, 0)
-	addStroke(label, Theme.StrokeSoft, 0.55, 1)
+	addStroke(label, Theme.StrokeSoft, 0, 1)
 	local iconSpec = config.Icon
 	if iconSpec == nil then iconSpec = "info" end
 	local icon = createIcon(iconSpec, label, m.Icon - 2, Theme.Muted, { Size = config.IconSize, Color = config.IconColor })
@@ -3565,12 +3537,12 @@ function Tab:AddLabel(config)
 	return object
 end
 -- ============================================================
--- AetherUI v2.3.0 - Parte 2/3
+-- AetherUI v2.9.0 - Parte 2/3
 -- Button, Toggle, Slider, Dropdown, MultiDropdown, ColorPicker
 -- ============================================================
 
 ----------------------------------------------------------------
--- Button (preservado + ripple + gradiente no hover)
+-- Button (Premium Dark: solido, limpo e preciso)
 ----------------------------------------------------------------
 function Tab:AddButton(config)
 	config = config or {}
@@ -3579,21 +3551,17 @@ function Tab:AddButton(config)
 	local button = create("TextButton", {
 		Name = "Button", LayoutOrder = self:_nextOrder(),
 		Size = UDim2.new(1, 0, 0, m.Row),
-		BackgroundColor3 = Theme.Element, BackgroundTransparency = Glass.Element, AutoButtonColor = false,
+		BackgroundColor3 = Theme.Element, BackgroundTransparency = 0, AutoButtonColor = false,
 		Text = config.Name or "Button", Font = Theme.Font,
 		TextSize = m.Text, TextColor3 = Theme.Text,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		ClipsDescendants = true, Parent = self._page,
 	})
-	addCorner(button, 10)
-	local stroke = addStroke(button, Theme.StrokeSoft, 0.35, 1)
+	addCorner(button, Radius.Card)
+	local stroke = addStroke(button, Theme.StrokeSoft, 0, 1)
 	local scale = create("UIScale", { Parent = button })
 	local padding = addPadding(button, 14, 0, 14, 0)
-	create("Frame", {
-		Name = "TopShine", BackgroundColor3 = Theme.White,
-		BackgroundTransparency = 0.965, Size = UDim2.new(1, 0, 0, 1), Parent = button,
-	})
 	local lead = createIcon(config.Icon, button, m.Icon, Theme.SubText, { Size = config.IconSize, Color = config.IconColor })
 	if lead then lead.Instance.AnchorPoint = Vector2.new(0, 0.5) end
 	local chevron = createIcon("chevron-right", button, m.Icon - 2, Theme.Muted)
@@ -3619,45 +3587,38 @@ function Tab:AddButton(config)
 	button.MouseEnter:Connect(function()
 		hovering = true
 		tween(button, Anim.Fast, { BackgroundColor3 = Theme.ElementHover })
-		tween(stroke, Anim.Fast, { Color = accent(), Transparency = 0.55 })
-		tween(scale, Anim.Fast, { Scale = 1.008 })
-		chevron:Tween(accentLight(), Anim.Fast)
-		tween(chevron.Instance, Anim.Fast, { Position = UDim2.new(1, (m.Icon - 2) + 12, 0.5, 0) })
-		if lead and not lead.CustomColor then lead:Tween(accentLight(), Anim.Fast) end
+		tween(stroke, Anim.Fast, { Color = accentBorder(0.35) })
+		chevron:Tween(Theme.Text, Anim.Fast)
+		tween(chevron.Instance, Anim.Fast, { Position = UDim2.new(1, (m.Icon - 2) + 11, 0.5, 0) })
+		if lead and not lead.CustomColor then lead:Tween(Theme.Text, Anim.Fast) end
 	end)
 	button.MouseLeave:Connect(function()
 		hovering = false
 		tween(button, Anim.Fast, { BackgroundColor3 = Theme.Element })
-		tween(stroke, Anim.Fast, { Color = Theme.StrokeSoft, Transparency = 0.35 })
+		tween(stroke, Anim.Fast, { Color = Theme.StrokeSoft })
 		tween(scale, Anim.Fast, { Scale = 1 })
 		tween(chevron.Instance, Anim.Fast, { Position = UDim2.new(1, (m.Icon - 2) + 8, 0.5, 0) })
 		chevron:Tween(Theme.Muted, Anim.Fast)
 		if lead and not lead.CustomColor then lead:Tween(Theme.SubText, Anim.Fast) end
 	end)
 	button.MouseButton1Down:Connect(function()
-		tween(button, Anim.Micro, { BackgroundColor3 = accentSoft(0.3) })
-		tween(scale, Anim.Micro, { Scale = 0.975 })
+		tween(button, Anim.Micro, { BackgroundColor3 = Theme.ElementPressed })
+		tween(scale, Anim.Micro, { Scale = 0.988 })
 	end)
 	button.MouseButton1Up:Connect(function()
 		tween(button, Anim.Fast, { BackgroundColor3 = hovering and Theme.ElementHover or Theme.Element })
-		tween(scale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
+		tween(scale, Anim.Fast, { Scale = 1 })
 	end)
 	button.Activated:Connect(function()
-		local flash = tween(stroke, Anim.Micro, { Color = accentLight(), Transparency = 0.05 })
+		local flash = tween(stroke, Anim.Micro, { Color = accentBorder(0.75) })
 		flash.Completed:Connect(function(playbackState)
 			if playbackState ~= Enum.PlaybackState.Completed then return end
-			tween(stroke, Anim.Normal, hovering
-				and { Color = accent(), Transparency = 0.55 }
-				or { Color = Theme.StrokeSoft, Transparency = 0.35 })
+			tween(stroke, Anim.Normal, { Color = hovering and accentBorder(0.35) or Theme.StrokeSoft })
 		end)
 		safeCall(config.Callback)
 	end)
 	button.InputBegan:Connect(function(input)
-		if not isPointer(input) then return end
-		local off = detectPointerOffset(input, button)
-		local rel = pointerPosition(input, off) - button.AbsolutePosition
-		spawnRipple(button, UDim2.fromOffset(math.floor(rel.X), math.floor(rel.Y)),
-			accentLight(), math.max(button.AbsoluteSize.X, button.AbsoluteSize.Y) * 2)
+		if isPointer(input) then detectPointerOffset(input, button) end
 	end)
 	local object = { Instance = button }
 	function object:SetText(newText) button.Text = tostring(newText) end
@@ -3668,7 +3629,7 @@ function Tab:AddButton(config)
 end
 
 ----------------------------------------------------------------
--- Toggle (preservado)
+-- Toggle (Premium Dark: switch solido sem glow/halo)
 ----------------------------------------------------------------
 function Tab:AddToggle(config)
 	config = config or {}
@@ -3678,17 +3639,13 @@ function Tab:AddToggle(config)
 	local row = create("TextButton", {
 		Name = "Toggle", LayoutOrder = self:_nextOrder(),
 		Size = UDim2.new(1, 0, 0, m.Row),
-		BackgroundColor3 = Theme.Element, BackgroundTransparency = Glass.Element, AutoButtonColor = false,
+		BackgroundColor3 = Theme.Element, BackgroundTransparency = 0, AutoButtonColor = false,
 		Text = "", ClipsDescendants = true, Parent = self._page,
 	})
-	addCorner(row, 10)
-	local stroke = addStroke(row, Theme.StrokeSoft, 0.35, 1)
+	addCorner(row, Radius.Card)
+	local stroke = addStroke(row, state and accentBorder(0.35) or Theme.StrokeSoft, 0, 1)
 	local rowScale = create("UIScale", { Parent = row })
-	create("Frame", {
-		Name = "TopShine", BackgroundColor3 = Theme.White,
-		BackgroundTransparency = 0.97, Size = UDim2.new(1, 0, 0, 1), Parent = row,
-	})
-	local lead = createIcon(config.Icon, row, m.Icon, Theme.SubText, { Size = config.IconSize, Color = config.IconColor })
+	local lead = createIcon(config.Icon, row, m.Icon, state and accentLight() or Theme.SubText, { Size = config.IconSize, Color = config.IconColor })
 	if lead then
 		lead.Instance.AnchorPoint = Vector2.new(0, 0.5)
 		lead.Instance.Position = UDim2.new(0, 14, 0.5, 0)
@@ -3705,51 +3662,24 @@ function Tab:AddToggle(config)
 		Name = "Switch", AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, -14, 0.5, 0),
 		Size = UDim2.fromOffset(m.SwitchW, m.SwitchH),
-		BackgroundColor3 = state and accent() or Theme.OffDeep,
+		BackgroundColor3 = state and accent() or Theme.BackgroundDeep,
 		ClipsDescendants = false, Parent = row,
 	})
 	addCornerScale(switch, 0.5)
 	local switchStroke = create("UIStroke", {
 		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-		Color = state and accentLight() or Theme.Off, Thickness = 1,
-		Transparency = state and 0.4 or 0.2, Parent = switch,
+		Color = state and accentBorder(0.75) or Theme.Stroke, Thickness = 1,
+		Transparency = 0, Parent = switch,
 	})
-	local switchGradient = addGradient(switch, NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 1),
-	}), 90)
-	table.insert(win._gradients, switchGradient)
 
 	local knobSize = m.SwitchH - 8
 	local knob = create("Frame", {
 		Name = "Knob", AnchorPoint = Vector2.new(0, 0.5),
-		Position = UDim2.new(0, 4, 0.5, 0),
+		Position = state and UDim2.new(1, -(knobSize + 4), 0.5, 0) or UDim2.new(0, 4, 0.5, 0),
 		Size = UDim2.fromOffset(knobSize, knobSize),
-		BackgroundColor3 = Theme.White, ZIndex = 2, Parent = switch,
+		BackgroundColor3 = state and Theme.White or Theme.SubText, ZIndex = 2, Parent = switch,
 	})
 	addCornerScale(knob, 0.5)
-	create("UIStroke", {
-		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-		Color = Theme.Black, Transparency = 0.85, Thickness = 1, Parent = knob,
-	})
-	local knobInner = create("Frame", {
-		Name = "Inner", AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(knobSize - 8, knobSize - 8),
-		BackgroundTransparency = 1, Parent = knob,
-	})
-	addCornerScale(knobInner, 0.5)
-	local knobInnerStroke = create("UIStroke", {
-		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-		Color = accent(), Thickness = 1.5, Transparency = 1, Parent = knobInner,
-	})
-	local glow = create("Frame", {
-		Name = "Glow", AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.new(1, 8, 1, 8),
-		BackgroundColor3 = accent(), BackgroundTransparency = 1,
-		ZIndex = 1, Parent = switch,
-	})
-	addCornerScale(glow, 0.5)
 
 	local function knobPosition()
 		if state then return UDim2.new(1, -(knobSize + 4), 0.5, 0) end
@@ -3757,19 +3687,12 @@ function Tab:AddToggle(config)
 	end
 	local function render(animate)
 		local on = state
-		setProps(switch, { BackgroundColor3 = on and accent() or Theme.OffDeep }, animate, Anim.Normal)
-		setProps(switchStroke, {
-			Color = on and accentLight() or Theme.Off,
-			Transparency = on and 0.35 or 0.15,
-		}, animate, Anim.Normal)
-		setProps(glow, { BackgroundTransparency = on and 0.82 or 1 }, animate, Anim.Normal)
-		setProps(knobInnerStroke, { Transparency = on and 0 or 1 }, animate, Anim.Normal)
+		setProps(switch, { BackgroundColor3 = on and accent() or Theme.BackgroundDeep }, animate, Anim.Normal)
+		setProps(switchStroke, { Color = on and accentBorder(0.75) or Theme.Stroke }, animate, Anim.Normal)
+		setProps(knob, { BackgroundColor3 = on and Theme.White or Theme.SubText }, animate, Anim.Fast)
 		if animate then tween(knob, Anim.Spring, { Position = knobPosition() }, Enum.EasingStyle.Back)
 		else knob.Position = knobPosition() end
-		setProps(stroke, {
-			Color = on and accent() or Theme.StrokeSoft,
-			Transparency = on and 0.5 or 0.35,
-		}, animate, Anim.Normal)
+		setProps(stroke, { Color = on and accentBorder(0.35) or Theme.StrokeSoft }, animate, Anim.Normal)
 		if lead and not lead.CustomColor then
 			if animate then lead:Tween(on and accentLight() or Theme.SubText, Anim.Normal)
 			else lead:SetColor(on and accentLight() or Theme.SubText) end
@@ -3788,20 +3711,17 @@ function Tab:AddToggle(config)
 		label.Size = UDim2.new(1, -(leftX + m.SwitchW + 28), 1, 0)
 		switch.Size = UDim2.fromOffset(m.SwitchW, m.SwitchH)
 		local ks = m.SwitchH - 8
+		knobSize = ks
 		knob.Size = UDim2.fromOffset(ks, ks)
-		knobInner.Size = UDim2.fromOffset(ks - 8, ks - 8)
-		glow.Size = UDim2.new(1, 8, 1, 8)
 		knob.Position = knobPosition()
 	end)
 	win:_onAccent(function(animate)
 		if state then
 			setProps(switch, { BackgroundColor3 = accent() }, animate, Anim.Normal)
-			setProps(switchStroke, { Color = accentLight() }, animate, Anim.Normal)
-			setProps(glow, { BackgroundColor3 = accent() }, animate, Anim.Normal)
-			setProps(knobInnerStroke, { Color = accent() }, animate, Anim.Normal)
+			setProps(switchStroke, { Color = accentBorder(0.75) }, animate, Anim.Normal)
 		end
 		if lead and not lead.CustomColor then lead:SetColor(state and accentLight() or Theme.SubText) end
-		setProps(stroke, { Color = state and accent() or Theme.StrokeSoft }, animate, Anim.Normal)
+		setProps(stroke, { Color = state and accentBorder(0.35) or Theme.StrokeSoft }, animate, Anim.Normal)
 	end)
 
 	local object = { Instance = row }
@@ -3809,20 +3729,6 @@ function Tab:AddToggle(config)
 		value = value == true
 		if value == state then return end
 		state = value; render(true)
-		if value and not State.LowPerformance then
-			local pulse = create("Frame", {
-				Name = "Pulse", AnchorPoint = Vector2.new(0.5, 0.5),
-				Position = UDim2.fromScale(0.5, 0.5),
-				Size = UDim2.new(1, 0, 1, 0),
-				BackgroundColor3 = accentLight(),
-				BackgroundTransparency = 0.55, ZIndex = 4, Parent = switch,
-			})
-			addCornerScale(pulse, 0.5)
-			local t = tween(pulse, Anim.Slow, {
-				Size = UDim2.new(1, 20, 1, 20), BackgroundTransparency = 1,
-			})
-			t.Completed:Connect(function() pulse:Destroy() end)
-		end
 		if not silent then safeCall(config.Callback, state) end
 	end
 	function object:Get() return state end
@@ -3830,7 +3736,6 @@ function Tab:AddToggle(config)
 	self:_register("Toggle", row, function() return label.Text end)
 	row.MouseEnter:Connect(function()
 		tween(row, Anim.Fast, { BackgroundColor3 = Theme.ElementHover })
-		tween(rowScale, Anim.Fast, { Scale = 1.004 })
 	end)
 	row.MouseLeave:Connect(function()
 		tween(row, Anim.Fast, { BackgroundColor3 = Theme.Element })
@@ -3844,16 +3749,14 @@ function Tab:AddToggle(config)
 		tween(rowScale, Anim.Micro, { Scale = 0.99 })
 		local ks = m.SwitchH - 8
 		tween(knob, Anim.Micro, {
-			Size = UDim2.fromOffset(ks + 4, ks),
-			Position = state and UDim2.new(1, -(ks + 8), 0.5, 0) or UDim2.new(0, 4, 0.5, 0),
+			Size = UDim2.fromOffset(ks + 3, ks),
+			Position = state and UDim2.new(1, -(ks + 7), 0.5, 0) or UDim2.new(0, 4, 0.5, 0),
 		})
-		tween(glow, Anim.Fast, { BackgroundTransparency = state and 0.7 or 0.9 })
 	end)
 	row.MouseButton1Up:Connect(function()
-		tween(rowScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
+		tween(rowScale, Anim.Fast, { Scale = 1 })
 		local ks = m.SwitchH - 8
 		tween(knob, Anim.Spring, { Size = UDim2.fromOffset(ks, ks), Position = knobPosition() }, Enum.EasingStyle.Back)
-		tween(glow, Anim.Normal, { BackgroundTransparency = state and 0.82 or 1 })
 	end)
 	row.MouseLeave:Connect(knobRest)
 	row.InputBegan:Connect(function(input)
@@ -3864,7 +3767,7 @@ function Tab:AddToggle(config)
 end
 
 ----------------------------------------------------------------
--- Slider (preservado)
+-- Slider (Premium Dark: trilha solida + badge de valor)
 ----------------------------------------------------------------
 function Tab:AddSlider(config)
 	config = config or {}
@@ -3885,46 +3788,51 @@ function Tab:AddSlider(config)
 	local holder = create("Frame", {
 		Name = "Slider", LayoutOrder = self:_nextOrder(),
 		Size = UDim2.new(1, 0, 0, m.Row + 14),
-		BackgroundColor3 = Theme.Element, BackgroundTransparency = Glass.Element, Parent = self._page,
+		BackgroundColor3 = Theme.Element, BackgroundTransparency = 0, Parent = self._page,
 	})
-	addCorner(holder, 10)
-	addStroke(holder, Theme.StrokeSoft, 0.35, 1)
+	addCorner(holder, Radius.Card)
+	local holderStroke = addStroke(holder, Theme.StrokeSoft, 0, 1)
 	local lead = createIcon(config.Icon, holder, m.Icon, Theme.SubText, { Size = config.IconSize, Color = config.IconColor })
 	if lead then
 		lead.Instance.AnchorPoint = Vector2.new(0, 0.5)
-		lead.Instance.Position = UDim2.new(0, 14, 0, 17)
+		lead.Instance.Position = UDim2.new(0, 14, 0, 18)
 	end
 	local nameLabel = create("TextLabel", {
 		Name = "Label", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(14, 8), Size = UDim2.new(1, -96, 0, 18),
+		Position = UDim2.fromOffset(14, 8), Size = UDim2.new(1, -102, 0, 20),
 		Text = config.Name or "Slider", Font = Theme.Font,
 		TextSize = m.Text, TextColor3 = Theme.Text,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd, Parent = holder,
 	})
-	local valueLabel = create("TextLabel", {
-		Name = "Value", AnchorPoint = Vector2.new(1, 0),
-		BackgroundTransparency = 1, Position = UDim2.new(1, -14, 0, 8),
-		Size = UDim2.fromOffset(70, 18), Text = "",
-		Font = Theme.FontBold, TextSize = m.Text - 1,
-		TextColor3 = Theme.SubText, TextXAlignment = Enum.TextXAlignment.Right, Parent = holder,
+	local valueBox = create("Frame", {
+		Name = "ValueBox", AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -14, 0, 7),
+		Size = UDim2.fromOffset(66, 20),
+		BackgroundColor3 = Theme.BackgroundDeep, Parent = holder,
 	})
-	attachValuePop(valueLabel, 1.1, 0.12)
+	addCorner(valueBox, Radius.Small)
+	local valueBoxStroke = addStroke(valueBox, Theme.StrokeSoft, 0, 1)
+	local valueLabel = create("TextLabel", {
+		Name = "Value", BackgroundTransparency = 1,
+		Size = UDim2.fromScale(1, 1), Text = "",
+		Font = Theme.FontBold, TextSize = math.max(10, m.Text - 2),
+		TextColor3 = Theme.SubText, TextXAlignment = Enum.TextXAlignment.Center, Parent = valueBox,
+	})
+	attachValuePop(valueLabel, 1.06, 0.12)
 	local track = create("Frame", {
 		Name = "Track", AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.new(0.5, 0, 1, -16), Size = UDim2.new(1, -28, 0, m.Mobile and 6 or 5),
-		BackgroundColor3 = Theme.OffDeep, Parent = holder,
+		BackgroundColor3 = Theme.BackgroundDeep, Parent = holder,
 	})
 	addCornerScale(track, 0.5)
+	addStroke(track, Theme.StrokeSoft, 0, 1)
 	local fill = create("Frame", {
 		Name = "Fill", Size = UDim2.new(0, 0, 1, 0),
 		BackgroundColor3 = accent(), Parent = track,
 	})
 	addCornerScale(fill, 0.5)
-	addGradient(fill, NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.35), NumberSequenceKeypoint.new(1, 0),
-	}), 0)
-	local function knobBase() return m.Compact and (m.Mobile and 16 or 14) or (m.Mobile and 20 or 16) end
+	local function knobBase() return m.Compact and (m.Mobile and 15 or 13) or (m.Mobile and 18 or 14) end
 	local knob = create("Frame", {
 		Name = "Knob", AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.new(0, 0, 0.5, 0),
@@ -3932,20 +3840,9 @@ function Tab:AddSlider(config)
 		BackgroundColor3 = Theme.White, ZIndex = 2, Parent = track,
 	})
 	addCornerScale(knob, 0.5)
-	local knobRing = create("Frame", {
-		Name = "Ring", AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(knobBase() - 8, knobBase() - 8),
-		BackgroundTransparency = 1, Parent = knob,
-	})
-	addCornerScale(knobRing, 0.5)
 	local knobRingStroke = create("UIStroke", {
 		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-		Color = accent(), Thickness = 2, Transparency = 0.35, Parent = knobRing,
-	})
-	local knobHalo = create("UIStroke", {
-		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-		Color = accent(), Thickness = 3, Transparency = 1, Parent = knob,
+		Color = accent(), Thickness = 2, Transparency = 0, Parent = knob,
 	})
 	local hit = create("TextButton", {
 		Name = "Hit", AnchorPoint = Vector2.new(0, 1),
@@ -3970,23 +3867,21 @@ function Tab:AddSlider(config)
 	win:_onLayout(function()
 		holder.Size = UDim2.new(1, 0, 0, m.Row + 14)
 		nameLabel.TextSize = m.Text
-		valueLabel.TextSize = m.Text - 1
+		valueLabel.TextSize = math.max(10, m.Text - 2)
 		local leftX = 14
 		if lead then
 			local sz = iconSizeOf(lead, m.Icon)
 			lead:SetSize(sz); leftX = 14 + sz + 10
 		end
 		nameLabel.Position = UDim2.fromOffset(leftX, 8)
-		nameLabel.Size = UDim2.new(1, -(leftX + 82), 0, 18)
+		nameLabel.Size = UDim2.new(1, -(leftX + 90), 0, 20)
 		hit.Size = UDim2.new(1, 0, 0, m.Mobile and 42 or 34)
-		local size = dragging and (knobBase() + 4) or knobBase()
+		local size = dragging and (knobBase() + 3) or knobBase()
 		knob.Size = UDim2.fromOffset(size, size)
-		knobRing.Size = UDim2.fromOffset(size - 8, size - 8)
 		render(false)
 	end)
 	win:_onAccent(function(animate)
 		setProps(fill, { BackgroundColor3 = accent() }, animate, Anim.Normal)
-		setProps(knobHalo, { Color = accent() }, animate, Anim.Normal)
 		setProps(knobRingStroke, { Color = accent() }, animate, Anim.Normal)
 	end)
 	local object = { Instance = holder }
@@ -4012,9 +3907,9 @@ function Tab:AddSlider(config)
 		lockedOffset = detectPointerOffset(input, hit)
 		lastRawPos = nil; lastMoveOffset = nil
 		self._page.ScrollingEnabled = false
-		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(knobBase() + 4, knobBase() + 4) })
-		tween(knobRing, Anim.Fast, { Size = UDim2.fromOffset(knobBase() - 4, knobBase() - 4) })
-		tween(knobHalo, Anim.Fast, { Transparency = 0.55 })
+		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(knobBase() + 3, knobBase() + 3) })
+		tween(holderStroke, Anim.Fast, { Color = accentBorder(0.45) })
+		tween(valueBoxStroke, Anim.Fast, { Color = accentBorder(0.45) })
 		tween(valueLabel, Anim.Fast, { TextColor3 = accentLight() })
 	end
 	local function stopDragging()
@@ -4022,8 +3917,8 @@ function Tab:AddSlider(config)
 		dragging = false; activeInput = nil; lockedOffset = nil; lastRawPos = nil; lastMoveOffset = nil
 		self._page.ScrollingEnabled = true
 		tween(knob, Anim.Fast, { Size = UDim2.fromOffset(knobBase(), knobBase()) })
-		tween(knobRing, Anim.Fast, { Size = UDim2.fromOffset(knobBase() - 8, knobBase() - 8) })
-		tween(knobHalo, Anim.Fast, { Transparency = 1 })
+		tween(holderStroke, Anim.Fast, { Color = Theme.StrokeSoft })
+		tween(valueBoxStroke, Anim.Fast, { Color = Theme.StrokeSoft })
 		tween(valueLabel, Anim.Fast, { TextColor3 = Theme.SubText })
 	end
 	local moveConn, hitMoveConn, endConn
@@ -4096,10 +3991,10 @@ local function buildDropdownShell(tab, config, className)
 	local root = create("Frame", {
 		Name = className, LayoutOrder = tab:_nextOrder(),
 		Size = UDim2.new(1, 0, 0, m.Row),
-		BackgroundColor3 = Theme.Element, BackgroundTransparency = Glass.Element, ClipsDescendants = true, Parent = tab._page,
+		BackgroundColor3 = Theme.Element, BackgroundTransparency = 0, ClipsDescendants = true, Parent = tab._page,
 	})
-	addCorner(root, 10)
-	local rootStroke = addStroke(root, Theme.StrokeSoft, 0.35, 1)
+	addCorner(root, Radius.Card)
+	local rootStroke = addStroke(root, Theme.StrokeSoft, 0, 1)
 
 	local header = create("TextButton", {
 		Name = "Header", Size = UDim2.new(1, 0, 0, m.Row),
@@ -4131,26 +4026,28 @@ local function buildDropdownShell(tab, config, className)
 	local chevron = createIcon("chevron-down", header, m.Icon - 2, Theme.Muted)
 	chevron.Instance.AnchorPoint = Vector2.new(1, 0.5)
 	chevron.Instance.Position = UDim2.new(1, -14, 0.5, 0)
-	attachValuePop(valueLabel, 1.08, 0)
+	attachValuePop(valueLabel, 1.05, 0)
 
 	local panel = create("CanvasGroup", {
 		Name = "Panel", Visible = false,
 		Position = UDim2.fromOffset(0, m.Row),
 		Size = UDim2.new(1, 0, 0, 0),
-		BackgroundColor3 = Theme.Surface, BackgroundTransparency = Glass.Panel,
+		BackgroundColor3 = Theme.Surface, BackgroundTransparency = 0,
 		GroupTransparency = 0, ClipsDescendants = true, Parent = root,
 	})
 	local panelScale = create("UIScale", { Scale = 1, Parent = panel })
-	addCorner(panel, 10)
-	addStroke(panel, Theme.StrokeSoft, 0.4, 1)
+	create("Frame", {
+		Name = "TopDivider", BackgroundColor3 = Theme.Divider,
+		Size = UDim2.new(1, 0, 0, 1), ZIndex = 4, Parent = panel,
+	})
 	local scroll = create("ScrollingFrame", {
 		Name = "Scroll", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(4, 4),
-		Size = UDim2.new(1, -8, 1, -8),
+		Position = UDim2.fromOffset(4, 5),
+		Size = UDim2.new(1, -8, 1, -9),
 		CanvasSize = UDim2.new(0, 0, 0, 0),
 		ScrollingDirection = Enum.ScrollingDirection.Y,
-		ScrollBarThickness = 3, ScrollBarImageColor3 = accent(),
-		ScrollBarImageTransparency = 0.4, Parent = panel,
+		ScrollBarThickness = 2, ScrollBarImageColor3 = accent(),
+		ScrollBarImageTransparency = 0.25, Parent = panel,
 	})
 	create("UIListLayout", {
 		Padding = UDim.new(0, 2), SortOrder = Enum.SortOrder.LayoutOrder, Parent = scroll,
@@ -4164,7 +4061,7 @@ local function buildDropdownShell(tab, config, className)
 
 	local function heights()
 		local rowH = dropdownRowHeight(m)
-		local content = #shell.Options * (rowH + 2) + 8
+		local content = #shell.Options * (rowH + 2) + 9
 		return math.min(content, 220), content, rowH
 	end
 
@@ -4172,8 +4069,8 @@ local function buildDropdownShell(tab, config, className)
 	local function paintHeader(animate)
 		local active = shell.Expanded or headerHover
 		local props = {
-			Color = active and accent() or Theme.StrokeSoft,
-			Transparency = active and 0.55 or 0.35,
+			Color = shell.Expanded and accentBorder(0.6) or (headerHover and Theme.StrokeStrong or Theme.StrokeSoft),
+			Transparency = 0,
 		}
 		if animate then
 			tween(rootStroke, Anim.Fast, props)
@@ -4202,8 +4099,8 @@ local function buildDropdownShell(tab, config, className)
 			panel.Visible = true
 			if doAnim then
 				panel.GroupTransparency = 1
-				panelScale.Scale = 0.94
-				panel.Position = UDim2.fromOffset(0, m.Row - 6)
+				panelScale.Scale = 0.98
+				panel.Position = UDim2.fromOffset(0, m.Row - 4)
 				tween(panel, Anim.Fast, {
 					Size = UDim2.new(1, 0, 0, panelH),
 					Position = UDim2.fromOffset(0, m.Row),
@@ -4231,7 +4128,7 @@ local function buildDropdownShell(tab, config, className)
 			win._openDropdowns[token] = nil
 			if doAnim then
 				tween(panel, Anim.Fast, { Size = UDim2.new(1, 0, 0, 0), GroupTransparency = 1 })
-				tween(panelScale, Anim.Fast, { Scale = 0.94 })
+				tween(panelScale, Anim.Fast, { Scale = 0.98 })
 				tween(root, Anim.Fast, { Size = UDim2.new(1, 0, 0, m.Row) })
 				tween(chevron.Instance, Anim.Fast, { Rotation = 0 })
 				task.delay(Anim.Fast + 0.03, function()
@@ -4340,7 +4237,11 @@ function Tab:AddDropdown(config)
 	local function paint()
 		for i, row in ipairs(shell.Rows) do
 			local isSel = selected ~= nil and options[i] == selected
-			setProps(row.Label, { TextColor3 = isSel and accentLight() or Theme.SubText }, true, Anim.Fast)
+			setProps(row.Button, {
+				BackgroundColor3 = isSel and accentSurface(0.14) or Theme.Surface,
+				BackgroundTransparency = 0,
+			}, true, Anim.Fast)
+			setProps(row.Label, { TextColor3 = isSel and Theme.Text or Theme.SubText }, true, Anim.Fast)
 			row.Check.Visible = isSel
 		end
 		shell.ValueLabel.Text = selected ~= nil and tostring(selected) or "Nenhum"
@@ -4348,33 +4249,36 @@ function Tab:AddDropdown(config)
 	end
 
 	local function buildRow(opt, i, rowH)
+		local isSel = selected ~= nil and opt == selected
 		local btn = create("TextButton", {
 			Name = "Option" .. i, LayoutOrder = i,
 			Size = UDim2.new(1, 0, 0, rowH),
-			BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.4,
+			BackgroundColor3 = isSel and accentSurface(0.14) or Theme.Surface, BackgroundTransparency = 0,
 			AutoButtonColor = false, Text = "", Parent = shell.Scroll,
 		})
-		addCorner(btn, 6)
+		addCorner(btn, Radius.Control)
 		local btnLabel = create("TextLabel", {
 			Name = "L", BackgroundTransparency = 1,
 			Position = UDim2.fromOffset(10, 0), Size = UDim2.new(1, -40, 1, 0),
 			Text = tostring(opt), Font = Theme.Font,
 			TextSize = m.Text - 1,
-			TextColor3 = (selected ~= nil and opt == selected) and accentLight() or Theme.SubText,
+			TextColor3 = isSel and Theme.Text or Theme.SubText,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextTruncate = Enum.TextTruncate.AtEnd, Parent = btn,
 		})
 		local check = createIcon("check", btn, m.Icon - 4, accentLight())
 		check.Instance.AnchorPoint = Vector2.new(1, 0.5)
 		check.Instance.Position = UDim2.new(1, -10, 0.5, 0)
-		check.Instance.Visible = selected ~= nil and opt == selected
+		check.Instance.Visible = isSel
 		btn.MouseEnter:Connect(function()
-			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.ElementHover, BackgroundTransparency = 0 })
+			local curSel = selected ~= nil and opt == selected
+			tween(btn, Anim.Fast, { BackgroundColor3 = curSel and accentSurface(0.18) or Theme.ElementHover, BackgroundTransparency = 0 })
 			btnLabel.TextColor3 = Theme.Text
 		end)
 		btn.MouseLeave:Connect(function()
-			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.4 })
-			btnLabel.TextColor3 = (selected ~= nil and opt == selected) and accentLight() or Theme.SubText
+			local curSel = selected ~= nil and opt == selected
+			tween(btn, Anim.Fast, { BackgroundColor3 = curSel and accentSurface(0.14) or Theme.Surface, BackgroundTransparency = 0 })
+			btnLabel.TextColor3 = curSel and Theme.Text or Theme.SubText
 		end)
 		btn.Activated:Connect(function()
 			object:Set(opt)
@@ -4470,8 +4374,12 @@ function Tab:AddMultiDropdown(config)
 		for i, row in ipairs(shell.Rows) do
 			local on = selected[options[i]] == true
 			row.Check.Visible = on
-			setProps(row.Box, { BackgroundColor3 = on and accent() or Theme.OffDeep }, true, Anim.Fast)
-			setProps(row.Label, { TextColor3 = on and accentLight() or Theme.SubText }, true, Anim.Fast)
+			setProps(row.Button, { BackgroundColor3 = on and accentSurface(0.12) or Theme.Surface, BackgroundTransparency = 0 }, true, Anim.Fast)
+			setProps(row.Box, { BackgroundColor3 = on and accent() or Theme.BackgroundDeep }, true, Anim.Fast)
+			if row.BoxStroke then
+				setProps(row.BoxStroke, { Color = on and accent() or Theme.Stroke, Transparency = 0 }, true, Anim.Fast)
+			end
+			setProps(row.Label, { TextColor3 = on and Theme.Text or Theme.SubText }, true, Anim.Fast)
 		end
 		local n = countSelected()
 		shell.ValueLabel.Text = n == 0 and "0" or (n .. " selecionado" .. (n > 1 and "s" or ""))
@@ -4483,21 +4391,22 @@ function Tab:AddMultiDropdown(config)
 		local btn = create("TextButton", {
 			Name = "Option" .. i, LayoutOrder = i,
 			Size = UDim2.new(1, 0, 0, rowH),
-			BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.4,
+			BackgroundColor3 = on and accentSurface(0.12) or Theme.Surface, BackgroundTransparency = 0,
 			AutoButtonColor = false, Text = "", Parent = shell.Scroll,
 		})
-		addCorner(btn, 6)
+		addCorner(btn, Radius.Control)
 		local box = create("Frame", {
 			Name = "Box", Position = UDim2.fromOffset(8, (rowH - 16) / 2),
 			Size = UDim2.fromOffset(16, 16),
-			BackgroundColor3 = on and accent() or Theme.OffDeep, Parent = btn,
+			BackgroundColor3 = on and accent() or Theme.BackgroundDeep, Parent = btn,
 		})
-		addCorner(box, 4)
+		addCorner(box, Radius.Small)
+		local boxStroke = addStroke(box, on and accent() or Theme.Stroke, 0, 1)
 		local btnLabel = create("TextLabel", {
 			Name = "L", BackgroundTransparency = 1,
 			Position = UDim2.fromOffset(32, 0), Size = UDim2.new(1, -40, 1, 0),
 			Text = tostring(opt), Font = Theme.Font,
-			TextSize = m.Text - 1, TextColor3 = on and accentLight() or Theme.SubText,
+			TextSize = m.Text - 1, TextColor3 = on and Theme.Text or Theme.SubText,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextTruncate = Enum.TextTruncate.AtEnd, Parent = btn,
 		})
@@ -4506,14 +4415,16 @@ function Tab:AddMultiDropdown(config)
 		check.Instance.Position = UDim2.fromScale(0.5, 0.5)
 		check.Instance.Visible = on
 		btn.MouseEnter:Connect(function()
-			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.ElementHover, BackgroundTransparency = 0 })
+			local curOn = selected[opt] == true
+			tween(btn, Anim.Fast, { BackgroundColor3 = curOn and accentSurface(0.16) or Theme.ElementHover, BackgroundTransparency = 0 })
 		end)
 		btn.MouseLeave:Connect(function()
-			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.4 })
+			local curOn = selected[opt] == true
+			tween(btn, Anim.Fast, { BackgroundColor3 = curOn and accentSurface(0.12) or Theme.Surface, BackgroundTransparency = 0 })
 		end)
 		btn.Activated:Connect(function() object:Toggle(opt) end)
 		return {
-			Button = btn, Label = btnLabel, Check = check.Instance, Box = box,
+			Button = btn, Label = btnLabel, Check = check.Instance, Box = box, BoxStroke = boxStroke,
 			Relayout = function(newRowH)
 				box.Position = UDim2.fromOffset(8, (newRowH - 16) / 2)
 				btnLabel.TextSize = m.Text - 1
@@ -4589,11 +4500,11 @@ function Tab:AddRadioGroup(config)
 	local root = create("Frame", {
 		Name = "RadioGroup", LayoutOrder = self:_nextOrder(),
 		Size = UDim2.new(1, 0, 0, m.Row),
-		BackgroundColor3 = Theme.Element, BackgroundTransparency = Glass.Element,
+		BackgroundColor3 = Theme.Element, BackgroundTransparency = 0,
 		ClipsDescendants = true, Parent = self._page,
 	})
-	addCorner(root, 10)
-	addStroke(root, Theme.StrokeSoft, 0.35, 1)
+	addCorner(root, Radius.Card)
+	addStroke(root, Theme.StrokeSoft, 0, 1)
 
 	local header = create("Frame", {
 		Name = "Header", Size = UDim2.new(1, 0, 0, m.Compact and 32 or 38),
@@ -4657,19 +4568,19 @@ function Tab:AddRadioGroup(config)
 		for i, row in ipairs(rows) do
 			local isSel = selected ~= nil and options[i] == selected
 			setProps(row.Button, {
-				BackgroundColor3 = isSel and accentSoft(0.22) or Theme.Surface,
-				BackgroundTransparency = isSel and 0.15 or 0.45,
+				BackgroundColor3 = isSel and accentSurface(0.14) or Theme.Surface,
+				BackgroundTransparency = 0,
 			}, animate, Anim.Fast)
 			setProps(row.RowStroke, {
-				Color = isSel and accent() or Theme.StrokeSoft,
-				Transparency = isSel and 0.45 or 0.7,
+				Color = isSel and accentBorder(0.55) or Theme.StrokeSoft,
+				Transparency = 0,
 			}, animate, Anim.Fast)
 			setProps(row.RingStroke, {
-				Color = isSel and accentLight() or Theme.Muted,
-				Transparency = isSel and 0.05 or 0.35,
+				Color = isSel and accent() or Theme.StrokeStrong,
+				Transparency = 0,
 			}, animate, Anim.Fast)
 			setProps(row.Dot, { BackgroundColor3 = accentLight() }, animate, Anim.Fast)
-			setProps(row.DotScale, { Scale = isSel and 1 or 0 }, animate, Anim.Spring, Enum.EasingStyle.Back)
+			setProps(row.DotScale, { Scale = isSel and 1 or 0 }, animate, Anim.Normal, Enum.EasingStyle.Quint)
 			setProps(row.Label, { TextColor3 = isSel and Theme.Text or Theme.SubText }, animate, Anim.Fast)
 		end
 		valueLabel.Text = selected ~= nil and tostring(selected) or "Nenhum"
@@ -4685,24 +4596,24 @@ function Tab:AddRadioGroup(config)
 			local btn = create("TextButton", {
 				Name = "Radio" .. i, LayoutOrder = i,
 				Size = UDim2.new(1, 0, 0, oh),
-				BackgroundColor3 = isSel and accentSoft(0.22) or Theme.Surface,
-				BackgroundTransparency = isSel and 0.15 or 0.45,
+				BackgroundColor3 = isSel and accentSurface(0.14) or Theme.Surface,
+				BackgroundTransparency = 0,
 				AutoButtonColor = false, Active = true, Text = "", Parent = listHolder,
 			})
-			addCorner(btn, 8)
-			local rowStroke = addStroke(btn, isSel and accent() or Theme.StrokeSoft, isSel and 0.45 or 0.7, 1)
+			addCorner(btn, Radius.Control)
+			local rowStroke = addStroke(btn, isSel and accentBorder(0.55) or Theme.StrokeSoft, 0, 1)
 			local ringSize = m.Mobile and 18 or 16
 			local ring = create("Frame", {
 				Name = "Ring", AnchorPoint = Vector2.new(0, 0.5),
 				Position = UDim2.new(0, 10, 0.5, 0),
 				Size = UDim2.fromOffset(ringSize, ringSize),
-				BackgroundTransparency = 1, Parent = btn,
+				BackgroundColor3 = Theme.BackgroundDeep, BackgroundTransparency = 0, Parent = btn,
 			})
 			addCornerScale(ring, 0.5)
 			local ringStroke = create("UIStroke", {
 				ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-				Color = isSel and accentLight() or Theme.Muted,
-				Thickness = 1.6, Transparency = isSel and 0.05 or 0.35, Parent = ring,
+				Color = isSel and accent() or Theme.StrokeStrong,
+				Thickness = 1.6, Transparency = 0, Parent = ring,
 			})
 			local dot = create("Frame", {
 				Name = "Dot", AnchorPoint = Vector2.new(0.5, 0.5),
@@ -4724,14 +4635,14 @@ function Tab:AddRadioGroup(config)
 			})
 			btn.MouseEnter:Connect(function()
 				if options[i] ~= selected then
-					tween(btn, Anim.Fast, { BackgroundColor3 = Theme.ElementHover, BackgroundTransparency = 0.1 })
+					tween(btn, Anim.Fast, { BackgroundColor3 = Theme.ElementHover, BackgroundTransparency = 0 })
 				end
 			end)
 			btn.MouseLeave:Connect(function()
 				local cur = options[i] == selected
 				tween(btn, Anim.Fast, {
-					BackgroundColor3 = cur and accentSoft(0.22) or Theme.Surface,
-					BackgroundTransparency = cur and 0.15 or 0.45,
+					BackgroundColor3 = cur and accentSurface(0.14) or Theme.Surface,
+					BackgroundTransparency = 0,
 				})
 			end)
 			btn.Activated:Connect(function() object:Set(opt) end)
@@ -4858,11 +4769,11 @@ function Tab:AddColorPicker(config)
 	local root = create("Frame", {
 		Name = "ColorPicker", LayoutOrder = self:_nextOrder(),
 		Size = UDim2.new(1, 0, 0, m.Row),
-		BackgroundColor3 = Theme.Element, BackgroundTransparency = Glass.Element, ClipsDescendants = true, Parent = self._page,
+		BackgroundColor3 = Theme.Element, BackgroundTransparency = 0, ClipsDescendants = true, Parent = self._page,
 	})
 	object.Instance = root
-	addCorner(root, 10)
-	addStroke(root, Theme.StrokeSoft, 0.35, 1)
+	addCorner(root, Radius.Card)
+	local rootStroke = addStroke(root, Theme.StrokeSoft, 0, 1)
 
 	local header = create("TextButton", {
 		Name = "Header", Size = UDim2.new(1, 0, 0, m.Row),
@@ -4888,8 +4799,8 @@ function Tab:AddColorPicker(config)
 		Size = UDim2.fromOffset(22, 22),
 		BackgroundColor3 = current, Parent = header,
 	})
-	addCorner(previewBadge, 6)
-	addStroke(previewBadge, Theme.White, 0.7, 1)
+	addCorner(previewBadge, Radius.Control)
+	addStroke(previewBadge, Theme.StrokeStrong, 0, 1)
 	local chevron = createIcon("chevron-down", header, m.Icon - 2, Theme.Muted)
 	chevron.Instance.AnchorPoint = Vector2.new(1, 0.5)
 	chevron.Instance.Position = UDim2.new(1, -14, 0.5, 0)
@@ -4899,12 +4810,10 @@ function Tab:AddColorPicker(config)
 		Name = "Panel", Visible = false,
 		Position = UDim2.fromOffset(0, m.Row),
 		Size = UDim2.new(1, 0, 0, 0),
-		BackgroundColor3 = Theme.Surface, BackgroundTransparency = Glass.Panel,
+		BackgroundColor3 = Theme.Surface, BackgroundTransparency = 0,
 		GroupTransparency = 0, ClipsDescendants = true, Parent = root,
 	})
 	local panelScale = create("UIScale", { Scale = 1, Parent = panel })
-	addCorner(panel, 10)
-	addStroke(panel, Theme.StrokeSoft, 0.4, 1)
 	addPadding(panel, 10, 10, 10, 10)
 	local panelLayout = create("UIListLayout", {
 		Padding = UDim.new(0, 8), SortOrder = Enum.SortOrder.LayoutOrder, Parent = panel,
@@ -5008,19 +4917,19 @@ function Tab:AddColorPicker(config)
 		Name = "BigPreview", Size = UDim2.fromOffset(28, 28),
 		BackgroundColor3 = current, Parent = infoRow,
 	})
-	addCorner(bigPreview, 6)
-	addStroke(bigPreview, Theme.White, 0.7, 1)
+	addCorner(bigPreview, Radius.Control)
+	addStroke(bigPreview, Theme.StrokeStrong, 0, 1)
 	local hexBox = create("TextBox", {
-		Name = "Hex", BackgroundTransparency = 1,
+		Name = "Hex", BackgroundColor3 = Theme.BackgroundDeep, BackgroundTransparency = 0,
 		Position = UDim2.fromOffset(36, 0), Size = UDim2.new(1, -36, 1, 0),
 		Text = toHex(current), PlaceholderText = "#RRGGBB", Font = Theme.FontBold,
 		TextSize = m.Text, TextColor3 = Theme.Text, PlaceholderColor3 = Theme.Muted,
 		TextXAlignment = Enum.TextXAlignment.Left,
 		ClearTextOnFocus = false, Parent = infoRow,
 	})
-	addCorner(hexBox, 6)
+	addCorner(hexBox, Radius.Control)
 	addPadding(hexBox, 8, 0, 8, 0)
-	local hexStroke = addStroke(hexBox, Theme.StrokeSoft, 0.5, 1)
+	local hexStroke = addStroke(hexBox, Theme.StrokeSoft, 0, 1)
 
 	-- Tons e presets (grade que quebra linha sozinha)
 	local cell = m.Mobile and 28 or 24
@@ -5045,13 +4954,13 @@ function Tab:AddColorPicker(config)
 				Name = title .. i, LayoutOrder = i,
 				BackgroundColor3 = color, AutoButtonColor = false, Text = "", Parent = row,
 			})
-			if circular then addCornerScale(b, 0.5) else addCorner(b, 6) end
-			local stroke = addStroke(b, circular and Theme.White or Theme.StrokeSoft, circular and 0.85 or 0.5, 1)
+			if circular then addCornerScale(b, 0.5) else addCorner(b, Radius.Control) end
+			local stroke = addStroke(b, Theme.StrokeSoft, 0, 1)
 			b.Activated:Connect(function() onPick(color) end)
 			store[i] = {
 				Button = b, Color = color, Stroke = stroke,
-				Base = circular and 0.85 or 0.5,
-				BaseColor = circular and Theme.White or Theme.StrokeSoft,
+				Base = 0,
+				BaseColor = Theme.StrokeSoft,
 			}
 		end
 	end
@@ -5198,10 +5107,10 @@ function Tab:AddColorPicker(config)
 
 	-- Campo HEX
 	hexBox.Focused:Connect(function()
-		tween(hexStroke, Anim.Fast, { Color = accent(), Transparency = 0.2 })
+		tween(hexStroke, Anim.Fast, { Color = accent(), Transparency = 0 })
 	end)
 	hexBox.FocusLost:Connect(function()
-		tween(hexStroke, Anim.Fast, { Color = Theme.StrokeSoft, Transparency = 0.5 })
+		tween(hexStroke, Anim.Fast, { Color = Theme.StrokeSoft, Transparency = 0 })
 		local parsed = parseHex(hexBox.Text)
 		if parsed then object:Set(parsed) else hexBox.Text = toHex(current) end
 	end)
@@ -5211,6 +5120,7 @@ function Tab:AddColorPicker(config)
 		value = value == true
 		if value == expanded then return end
 		expanded = value
+		tween(rootStroke, Anim.Fast, { Color = expanded and accentBorder(0.6) or Theme.StrokeSoft, Transparency = 0 })
 		local doAnim = animate and not State.LowPerformance
 		if value then
 			win:_closeDropdowns(token)
@@ -5219,8 +5129,8 @@ function Tab:AddColorPicker(config)
 			local ph = contentHeight()
 			if doAnim then
 				panel.GroupTransparency = 1
-				panelScale.Scale = 0.94
-				panel.Position = UDim2.fromOffset(0, m.Row - 6)
+				panelScale.Scale = 0.98
+				panel.Position = UDim2.fromOffset(0, m.Row - 4)
 				tween(panel, Anim.Fast, {
 					Size = UDim2.new(1, 0, 0, ph),
 					Position = UDim2.fromOffset(0, m.Row),
@@ -5249,7 +5159,7 @@ function Tab:AddColorPicker(config)
 			win._openDropdowns[token] = nil
 			if doAnim then
 				tween(panel, Anim.Fast, { Size = UDim2.new(1, 0, 0, 0), GroupTransparency = 1 })
-				tween(panelScale, Anim.Fast, { Scale = 0.94 })
+				tween(panelScale, Anim.Fast, { Scale = 0.98 })
 				tween(root, Anim.Fast, { Size = UDim2.new(1, 0, 0, m.Row) })
 				tween(chevron.Instance, Anim.Fast, { Rotation = 0 })
 				task.delay(Anim.Fast + 0.03, function()
@@ -5335,11 +5245,7 @@ function Tab:_applyMetrics()
 	self:_refresh()
 end
 
--- Escala de repouso: aba selecionada fica ligeiramente maior.
 function Tab:_restScale()
-	if State.LowPerformance then return 1 end
-	if self._window._selectedTab == self then return 1.035 end
-	if self._hover then return 1.01 end
 	return 1
 end
 
@@ -5348,19 +5254,19 @@ function Tab:_paint(animate)
 	local hovering = self._hover == true and not selected
 	local textColor = (selected or hovering) and Theme.Text or Theme.SubText
 	local iconColor = selected and accentLight() or (hovering and Theme.Text or Theme.SubText)
-	local backgroundTransparency = hovering and 0.5 or 1
+	local backgroundTransparency = hovering and 0 or 1
 	if animate then
 		tween(self._button, Anim.Fast, { BackgroundTransparency = backgroundTransparency })
-		tween(self._label, Anim.Normal, { TextColor3 = textColor })
-		if self._icon and not self._icon.CustomColor then self._icon:Tween(iconColor, Anim.Normal) end
+		tween(self._label, Anim.Fast, { TextColor3 = textColor })
+		if self._icon and not self._icon.CustomColor then self._icon:Tween(iconColor, Anim.Fast) end
 		if self._scaleObj and not self._pressed then
-			tween(self._scaleObj, Anim.Smooth, { Scale = self:_restScale() })
+			tween(self._scaleObj, Anim.Fast, { Scale = 1 })
 		end
 	else
 		self._button.BackgroundTransparency = backgroundTransparency
 		self._label.TextColor3 = textColor
 		if self._icon and not self._icon.CustomColor then self._icon:SetColor(iconColor) end
-		if self._scaleObj then self._scaleObj.Scale = self:_restScale() end
+		if self._scaleObj then self._scaleObj.Scale = 1 end
 	end
 end
 
@@ -5455,41 +5361,22 @@ function Window:_moveIndicator(animate)
 	if not tab or tab._y == nil then
 		self._highlight.Visible = false
 		self._indicator.Visible = false
-		if self._indicatorGlow then self._indicatorGlow.Visible = false end
 		return
 	end
-	local indicatorHeight = math.max(12, math.floor(m.SideRow * 0.52))
+	local indicatorHeight = math.max(12, math.floor(m.SideRow * 0.5))
 	local y = tab._y
 	local indicatorY = y + math.floor((m.SideRow - indicatorHeight) / 2)
 	local highlightProps = { Position = UDim2.fromOffset(0, y), Size = UDim2.new(1, 0, 0, m.SideRow) }
-	local indicatorProps = { Position = UDim2.fromOffset(-m.SidePad + 2, indicatorY), Size = UDim2.fromOffset(3, indicatorHeight) }
-	local glowProps = { Position = UDim2.fromOffset(-m.SidePad, indicatorY - 2), Size = UDim2.fromOffset(7, indicatorHeight + 4) }
+	local indicatorProps = { Position = UDim2.fromOffset(4, indicatorY), Size = UDim2.fromOffset(3, indicatorHeight) }
 	local firstShow = not self._highlight.Visible
 	self._highlight.Visible = true
 	self._indicator.Visible = true
-	if self._indicatorGlow then self._indicatorGlow.Visible = not State.LowPerformance end
 	if animate and not firstShow and not State.LowPerformance then
-		local dist = math.abs(indicatorProps.Position.Y.Offset - self._indicator.Position.Y.Offset)
-		tween(self._highlight, Anim.Smooth, highlightProps)
-		tween(self._indicator, Anim.Smooth, { Position = indicatorProps.Position })
-		if self._indicatorGlow then
-			tween(self._indicatorGlow, Anim.Smooth, { Position = glowProps.Position, Size = glowProps.Size })
-		end
-		local stretch = math.min(dist * 0.28, 14)
-		if stretch > 1 then
-			local grow = tween(self._indicator, Anim.Fast, { Size = UDim2.fromOffset(3, indicatorHeight + stretch) })
-			grow.Completed:Connect(function(playbackState)
-				if playbackState == Enum.PlaybackState.Completed then
-					tween(self._indicator, Anim.Normal, { Size = indicatorProps.Size })
-				end
-			end)
-		else
-			tween(self._indicator, Anim.Fast, { Size = indicatorProps.Size })
-		end
+		tween(self._highlight, Anim.Fast, highlightProps)
+		tween(self._indicator, Anim.Fast, indicatorProps)
 	else
 		for k, v in pairs(highlightProps) do self._highlight[k] = v end
 		for k, v in pairs(indicatorProps) do self._indicator[k] = v end
-		if self._indicatorGlow then for k, v in pairs(glowProps) do self._indicatorGlow[k] = v end end
 	end
 end
 
@@ -5542,8 +5429,12 @@ function Window:_applyLayout(animate)
 	self._header.Position = UDim2.fromOffset(m.Pad + 4, 8)
 	self._header.Size = UDim2.new(1, -(m.Pad * 2 + 8), 0, m.Header)
 	self._header.TextSize = m.Text + 3
-	self._pages.Position = UDim2.fromOffset(0, m.Header + 12)
-	self._pages.Size = UDim2.new(1, 0, 1, -(m.Header + 12))
+	if self._headerDivider then
+		self._headerDivider.Position = UDim2.fromOffset(m.Pad + 4, m.Header + 10)
+		self._headerDivider.Size = UDim2.new(1, -(m.Pad * 2 + 8), 0, 1)
+	end
+	self._pages.Position = UDim2.fromOffset(0, m.Header + 14)
+	self._pages.Size = UDim2.new(1, 0, 1, -(m.Header + 14))
 	self._ball.Size = UDim2.fromOffset(m.Ball, m.Ball)
 	self._ball.Position = clampBallPosition(self._ball.Position, m.Ball)
 
@@ -5583,22 +5474,11 @@ end
 function Window:_applyPerformance()
 	local lowPerformance = State.LowPerformance
 	if self._shadow then self._shadow.Sync() end
-	if self._moonLayer then self._moonLayer.Visible = not lowPerformance end
 	for _, gradient in ipairs(self._gradients) do
 		pcall(function() gradient.Enabled = not lowPerformance end)
 	end
-	if lowPerformance then
-		if self._pulse then self._pulse:Cancel(); self._pulse = nil end
-		self._ballStroke.Transparency = 0.35
-		if self._indicatorGlow then self._indicatorGlow.Visible = false end
-	elseif self._state == "Minimized" and self._ball.Visible and not self._pulse then
-		self._ballStroke.Transparency = 0.7
-		self._pulse = TweenService:Create(
-			self._ballStroke,
-			TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-			{ Transparency = 0.2 }
-		)
-		self._pulse:Play()
+	if self._ballStroke then
+		self._ballStroke.Transparency = 0
 	end
 	self:_refreshActivity()
 	self:_syncSettings()
@@ -5942,10 +5822,10 @@ function Window:_renderSearchResults(query)
 		local btn = create("TextButton", {
 			Name = "R" .. i, LayoutOrder = i,
 			Size = UDim2.new(1, 0, 0, rowH),
-			BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.2,
+			BackgroundColor3 = Theme.Element, BackgroundTransparency = 0,
 			AutoButtonColor = false, Text = "", Parent = scroll,
 		})
-		addCorner(btn, 6)
+		addCorner(btn, Radius.Control)
 		create("TextLabel", {
 			Name = "Name", BackgroundTransparency = 1,
 			Position = UDim2.fromOffset(10, 3), Size = UDim2.new(1, -86, 0, math.floor(rowH * 0.5)),
@@ -5972,7 +5852,7 @@ function Window:_renderSearchResults(query)
 			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.ElementHover, BackgroundTransparency = 0 })
 		end)
 		btn.MouseLeave:Connect(function()
-			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.Element, BackgroundTransparency = 0.2 })
+			tween(btn, Anim.Fast, { BackgroundColor3 = Theme.Element, BackgroundTransparency = 0 })
 		end)
 		btn.Activated:Connect(function() self:_pickSearchResult(item) end)
 	end
@@ -5992,11 +5872,11 @@ function Window:_createTab(label, iconSpec, isSettings, iconOpts, isMenu)
 		AutoButtonColor = false, Text = "", ClipsDescendants = true,
 		ZIndex = 2, Parent = self._list,
 	})
-	addCorner(button, 10)
+	addCorner(button, Radius.Card)
 	local buttonScale = create("UIScale", { Parent = button })
 	local hoverStroke = create("UIStroke", {
 		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-		Color = accent(), Thickness = 1, Transparency = 1, Parent = button,
+		Color = Theme.Stroke, Thickness = 1, Transparency = 1, Parent = button,
 	})
 	local icon = createIcon(iconSpec, button, m.Icon, Theme.SubText, iconOpts)
 	if icon then
@@ -6023,8 +5903,8 @@ function Window:_createTab(label, iconSpec, isSettings, iconOpts, isMenu)
 		Size = UDim2.new(1, 0, 1, 0), CanvasSize = UDim2.new(0, 0, 0, 0),
 		AutomaticCanvasSize = Enum.AutomaticSize.None,
 		ScrollingDirection = Enum.ScrollingDirection.Y,
-		ScrollBarThickness = 3, ScrollBarImageColor3 = accent(),
-		ScrollBarImageTransparency = 0.45,
+		ScrollBarThickness = 2, ScrollBarImageColor3 = accent(),
+		ScrollBarImageTransparency = 0.25,
 		VerticalScrollBarInset = Enum.ScrollBarInset.None, Parent = holder,
 	})
 	local pagePadding = addPadding(page, m.Pad, m.Pad, m.Pad, m.Pad)
@@ -6049,7 +5929,7 @@ function Window:_createTab(label, iconSpec, isSettings, iconOpts, isMenu)
 	button.MouseEnter:Connect(function()
 		tab._hover = true; tab:_paint(true)
 		if self._selectedTab ~= tab then
-			tween(hoverStroke, Anim.Fast, { Transparency = 0.85 })
+			tween(hoverStroke, Anim.Fast, { Transparency = 0 })
 		end
 	end)
 	button.MouseLeave:Connect(function()
@@ -6058,11 +5938,11 @@ function Window:_createTab(label, iconSpec, isSettings, iconOpts, isMenu)
 	end)
 	button.MouseButton1Down:Connect(function()
 		tab._pressed = true
-		tween(buttonScale, Anim.Micro, { Scale = 0.94 })
+		tween(buttonScale, Anim.Micro, { Scale = 0.98 })
 	end)
 	button.MouseButton1Up:Connect(function()
 		tab._pressed = false
-		tween(buttonScale, Anim.Spring, { Scale = tab:_restScale() }, Enum.EasingStyle.Back)
+		tween(buttonScale, Anim.Fast, { Scale = 1 })
 	end)
 	button.InputBegan:Connect(function(input)
 		if isPointer(input) then detectPointerOffset(input, button) end
@@ -6070,7 +5950,6 @@ function Window:_createTab(label, iconSpec, isSettings, iconOpts, isMenu)
 	button.Activated:Connect(function() self:_selectTab(tab, true) end)
 	self:_onAccent(function(animate)
 		page.ScrollBarImageColor3 = accent()
-		setProps(hoverStroke, { Color = accent() }, animate, Anim.Normal)
 		tab:_paint(animate)
 	end)
 	tab:_applyCollapse(self._collapsed == true, false)
@@ -6124,11 +6003,11 @@ function Window:_buildMenu()
 		local tile = create("Frame", {
 			Name = "Tile_" .. titleStr, LayoutOrder = order,
 			Size = UDim2.new(1 / 3, -4, 1, 0),
-			BackgroundColor3 = Theme.Element, BackgroundTransparency = Glass.Element,
+			BackgroundColor3 = Theme.Surface, BackgroundTransparency = 0,
 			Parent = metricsCard,
 		})
-		addCorner(tile, 10)
-		addStroke(tile, Theme.StrokeSoft, 0.35, 1)
+		addCorner(tile, Radius.Card)
+		addStroke(tile, Theme.StrokeSoft, 0, 1)
 		create("TextLabel", {
 			Name = "Caption", BackgroundTransparency = 1,
 			Position = UDim2.fromOffset(9, 6), Size = UDim2.new(1, -18, 0, 12),
@@ -6160,11 +6039,11 @@ function Window:_buildMenu()
 	local graphCard = create("Frame", {
 		Name = "FpsGraphCard", LayoutOrder = tab:_nextOrder(),
 		Size = UDim2.new(1, 0, 0, m.Compact and 104 or 116),
-		BackgroundColor3 = Theme.Element, BackgroundTransparency = Glass.Element,
+		BackgroundColor3 = Theme.Surface, BackgroundTransparency = 0,
 		Parent = page,
 	})
-	addCorner(graphCard, 10)
-	local graphStroke = addStroke(graphCard, Theme.StrokeSoft, 0.35, 1)
+	addCorner(graphCard, Radius.Card)
+	local graphStroke = addStroke(graphCard, Theme.StrokeSoft, 0, 1)
 
 	create("TextLabel", {
 		Name = "Title", BackgroundTransparency = 1,
@@ -6181,19 +6060,20 @@ function Window:_buildMenu()
 	})
 
 	local plot = create("Frame", {
-		Name = "Plot", BackgroundColor3 = Theme.Surface, BackgroundTransparency = 0.35,
+		Name = "Plot", BackgroundColor3 = Theme.BackgroundDeep, BackgroundTransparency = 0,
 		Position = UDim2.fromOffset(10, 28), Size = UDim2.new(1, -20, 1, -38),
 		ClipsDescendants = true, Parent = graphCard,
 	})
-	addCorner(plot, 7)
+	addCorner(plot, Radius.Control)
+	addStroke(plot, Theme.StrokeSoft, 0, 1)
 
 	-- Guias de referencia (30 FPS e 60 FPS)
 	create("Frame", {
-		Name = "Guide60", BackgroundColor3 = Theme.Success, BackgroundTransparency = 0.8,
+		Name = "Guide60", BackgroundColor3 = Theme.Success, BackgroundTransparency = 0.78,
 		Position = UDim2.new(0, 0, 0.16, 0), Size = UDim2.new(1, 0, 0, 1), ZIndex = 1, Parent = plot,
 	})
 	create("Frame", {
-		Name = "Guide30", BackgroundColor3 = Theme.Warning, BackgroundTransparency = 0.82,
+		Name = "Guide30", BackgroundColor3 = Theme.Warning, BackgroundTransparency = 0.78,
 		Position = UDim2.new(0, 0, 0.58, 0), Size = UDim2.new(1, 0, 0, 1), ZIndex = 1, Parent = plot,
 	})
 
@@ -6209,7 +6089,7 @@ function Window:_buildMenu()
 			Name = "B" .. i, AnchorPoint = Vector2.new(0, 1),
 			Position = UDim2.new((i - 1) / barCount, 1, 1, 0),
 			Size = UDim2.new(1 / barCount, -2, 0.1, 0),
-			BackgroundColor3 = Theme.Success, BackgroundTransparency = 0.15,
+			BackgroundColor3 = Theme.Success, BackgroundTransparency = 0,
 			ZIndex = 2, Parent = barHolders,
 		})
 		addCorner(bar, 2)
@@ -6305,11 +6185,11 @@ function Window:_buildMenu()
 	local smartCard = create("Frame", {
 		Name = "SmartPerfCard", LayoutOrder = tab:_nextOrder(),
 		Size = UDim2.new(1, 0, 0, m.Compact and 100 or 108),
-		BackgroundColor3 = Theme.Element, BackgroundTransparency = Glass.Element,
+		BackgroundColor3 = Theme.Surface, BackgroundTransparency = 0,
 		Parent = page,
 	})
-	addCorner(smartCard, 10)
-	local smartStroke = addStroke(smartCard, Theme.StrokeSoft, 0.35, 1)
+	addCorner(smartCard, Radius.Card)
+	local smartStroke = addStroke(smartCard, Theme.StrokeSoft, 0, 1)
 
 	local smartDot = create("Frame", {
 		Name = "Dot", AnchorPoint = Vector2.new(0, 0.5),
@@ -6358,8 +6238,8 @@ function Window:_buildMenu()
 	})
 
 	self:_onAccent(function(animate)
-		setProps(graphStroke, { Color = accentSoft(0.45) }, animate, Anim.Normal)
-		setProps(smartStroke, { Color = SmartPerf.Enabled and accent() or Theme.StrokeSoft }, animate, Anim.Normal)
+		setProps(graphStroke, { Color = Theme.StrokeSoft }, animate, Anim.Normal)
+		setProps(smartStroke, { Color = SmartPerf.Enabled and accentBorder(0.6) or Theme.StrokeSoft }, animate, Anim.Normal)
 	end)
 
 	self._menuControls = {
@@ -6797,12 +6677,12 @@ function Window:_updatePerfViews()
 				bar.Visible = true
 				bar.Size = UDim2.new(1 / maxCap, -2, ratio, 0)
 				bar.BackgroundColor3 = barColor
-				bar.BackgroundTransparency = (i == maxCap) and 0.05 or 0.25
+				bar.BackgroundTransparency = (i == maxCap) and 0 or 0.14
 			else
 				bar.Visible = true
 				bar.Size = UDim2.new(1 / maxCap, -2, 0.06, 0)
-				bar.BackgroundColor3 = Theme.Muted
-				bar.BackgroundTransparency = 0.72
+				bar.BackgroundColor3 = Theme.Stroke
+				bar.BackgroundTransparency = 0
 			end
 		end
 
@@ -6815,7 +6695,7 @@ function Window:_updatePerfViews()
 			if menu.SmartRadii then
 				menu.SmartRadii.Text = string.format("Raios: %d/%d/%d st  •  Ciclo: %dms  •  Cache: %d", sp.NearRadius, sp.FarRadius, sp.CullRadius, sp.StepIntervalMs or 180, sp.CachedCount)
 			end
-			menu.SmartStroke.Color = accent()
+			menu.SmartStroke.Color = accentBorder(0.6)
 		else
 			menu.SmartDot.BackgroundColor3 = Theme.Muted
 			menu.SmartHeader.Text = string.format("Inativo (%s %d%%)  •  %d FPS", sp.Mode or "Automatico", SmartPerf.Config.Intensity or 100, st.FPS)
@@ -6836,29 +6716,20 @@ end
 function Window:_showBall()
 	self._ball.Position = clampBallPosition(self._ball.Position, self._metrics.Ball)
 	self._ball.Visible = true
-	if self._pulse then self._pulse:Cancel(); self._pulse = nil end
+	self._ballStroke.Transparency = 0
 	if not State.LowPerformance then
 		self._ball.BackgroundTransparency = 1
-		self._ballScale.Scale = 0.15
-		tween(self._ball, Anim.Normal + 0.05, { BackgroundTransparency = Glass.Ball })
-		tween(self._ballScale, Anim.Normal + 0.05, { Scale = 1 }, Enum.EasingStyle.Back)
+		self._ballScale.Scale = 0.72
+		tween(self._ball, Anim.Normal, { BackgroundTransparency = 0 })
+		tween(self._ballScale, Anim.Normal, { Scale = 1 })
 	else
-		self._ball.BackgroundTransparency = Glass.Ball
+		self._ball.BackgroundTransparency = 0
 		self._ballScale.Scale = 1
-		self._ballStroke.Transparency = 0.35
-		return
 	end
-	self._ballStroke.Transparency = 0.7
-	self._pulse = TweenService:Create(
-		self._ballStroke,
-		TweenInfo.new(1.1, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-		{ Transparency = 0.2 }
-	)
-	self._pulse:Play()
 end
 
--- Estado + atividade. Toda mudanca de estado passa por aqui para que os
--- Heartbeats (luas/perf monitor) liguem e desliguem junto com a visibilidade.
+-- Estado + atividade. Toda mudanca de estado passa por aqui para que o
+-- Heartbeat do Performance Monitor ligue e desligue junto com a visibilidade.
 function Window:_setState(state)
 	if self._state == "Destroyed" and state ~= "Destroyed" then return end
 	self._state = state
@@ -6866,14 +6737,6 @@ function Window:_setState(state)
 end
 
 function Window:_refreshActivity()
-	local state = self._state
-	local shown = state == "Opening" or state == "Open" or state == "Restoring" or state == "Minimizing"
-	local root, gui = self._root, self._gui
-	if shown and root and not root.Visible then shown = false end
-	if shown and gui and not gui.Enabled then shown = false end
-	if self._setMoonsRunning then
-		self._setMoonsRunning(shown and not State.LowPerformance)
-	end
 	refreshPerfSubscription()
 end
 
@@ -7007,28 +6870,28 @@ function Window:_showCloseConfirm()
 	local card = create("CanvasGroup", {
 		Name = "Card", AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(280, 156),
-		BackgroundColor3 = Theme.Surface, BackgroundTransparency = Glass.Card,
+		Size = UDim2.fromOffset(296, 152),
+		BackgroundColor3 = Theme.Surface, BackgroundTransparency = 0,
 		GroupTransparency = 1, Parent = layer,
 	})
 	local cardScale = create("UIScale", { Scale = 1, Parent = card })
-	addCorner(card, 14)
-	addStroke(card, Theme.Stroke, 0.3, 1)
-	attachShadow(card, layer, 14, cardScale)
+	addCorner(card, Radius.Window)
+	addStroke(card, Theme.Stroke, 0, 1)
+	attachShadow(card, layer, Radius.Window, cardScale)
 
-	local title = create("TextLabel", {
+	create("TextLabel", {
 		Name = "Title", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(20, 20),
-		Size = UDim2.new(1, -40, 0, 24),
+		Position = UDim2.fromOffset(20, 18),
+		Size = UDim2.new(1, -40, 0, 22),
 		Text = "Fechar a interface?",
 		Font = Theme.FontBold, TextSize = 15,
 		TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left, Parent = card,
 	})
-	local msg = create("TextLabel", {
+	create("TextLabel", {
 		Name = "Msg", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(20, 48),
+		Position = UDim2.fromOffset(20, 44),
 		Size = UDim2.new(1, -40, 0, 44),
-		Text = "A janela sera destruida e todas as configuracoes abertas serao perdidas.",
+		Text = "A janela sera destruida e as alteracoes nao salvas serao descartadas.",
 		Font = Theme.Font, TextSize = 12,
 		TextColor3 = Theme.SubText, TextWrapped = true,
 		TextXAlignment = Enum.TextXAlignment.Left,
@@ -7039,63 +6902,38 @@ function Window:_showCloseConfirm()
 		local b = create("TextButton", {
 			Name = "Btn_" .. text, AnchorPoint = Vector2.new(0, 1),
 			Position = UDim2.new(xPos, 0, 1, -16),
-			Size = UDim2.fromOffset(120, 34),
+			Size = UDim2.fromOffset(124, 34),
 			BackgroundColor3 = color, AutoButtonColor = false,
 			Text = text, Font = Theme.FontBold,
 			TextSize = 13, TextColor3 = textColor, Parent = card,
 		})
-		addCorner(b, 8)
+		addCorner(b, Radius.Control)
 		return b
 	end
-	local noBtn = makeBtn("Nao", 0.5, Theme.Element, Theme.Text)
+	local noBtn = makeBtn("Cancelar", 0.5, Theme.Element, Theme.Text)
 	noBtn.AnchorPoint = Vector2.new(1, 1)
-	noBtn.Size = UDim2.fromOffset(120, 34)
-	noBtn.Position = UDim2.new(0.5, -6, 1, -16)
-	local yesBtn = makeBtn("Sim", 0.5, Theme.Danger, Theme.White)
-	yesBtn.Position = UDim2.new(0.5, 6, 1, -16)
+	noBtn.Size = UDim2.fromOffset(124, 34)
+	noBtn.Position = UDim2.new(0.5, -5, 1, -16)
+	addStroke(noBtn, Theme.Stroke, 0, 1)
+	local yesBtn = makeBtn("Fechar", 0.5, Theme.Danger, Theme.White)
+	yesBtn.Position = UDim2.new(0.5, 5, 1, -16)
 
 	local function microButton(b)
 		local s = create("UIScale", { Parent = b })
-		b.MouseEnter:Connect(function()
-			tween(s, Anim.Fast, { Scale = 1.04 })
-		end)
-		b.MouseLeave:Connect(function() tween(s, Anim.Fast, { Scale = 1 }) end)
 		b.MouseButton1Down:Connect(function()
-			tween(s, Anim.Micro, { Scale = 0.94 })
+			tween(s, Anim.Micro, { Scale = 0.97 })
 		end)
 		b.MouseButton1Up:Connect(function()
-			tween(s, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
+			tween(s, Anim.Fast, { Scale = 1 })
 		end)
 	end
 	microButton(noBtn); microButton(yesBtn)
-	if not State.LowPerformance then
-		local function reveal(object, delay, props)
-			task.delay(delay, function()
-				if object.Parent then tween(object, Anim.Smooth, props) end
-			end)
-		end
-		title.TextTransparency = 1
-		msg.TextTransparency = 1
-		title.Position = UDim2.fromOffset(20, 28)
-		msg.Position = UDim2.fromOffset(20, 56)
-		reveal(title, 0.06, { TextTransparency = 0, Position = UDim2.fromOffset(20, 20) })
-		reveal(msg, 0.12, { TextTransparency = 0, Position = UDim2.fromOffset(20, 48) })
-		for index, b in ipairs({ noBtn, yesBtn }) do
-			local finalPosition = b.Position
-			b.BackgroundTransparency = 1
-			b.TextTransparency = 1
-			b.Position = finalPosition + UDim2.fromOffset(0, 10)
-			reveal(b, 0.16 + index * 0.05, {
-				BackgroundTransparency = 0, TextTransparency = 0, Position = finalPosition,
-			})
-		end
-	end
 
 	local function closeConfirm()
 		if not layer.Parent then return end
 		if not State.LowPerformance then
 			local t = tween(card, Anim.Fast, { GroupTransparency = 1 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-			tween(cardScale, Anim.Fast, { Scale = 0.88 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+			tween(cardScale, Anim.Fast, { Scale = 0.96 }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
 			tween(overlay, Anim.Fast, { BackgroundTransparency = 1 })
 			t.Completed:Connect(function() if layer.Parent then layer:Destroy() end end)
 		else
@@ -7126,14 +6964,14 @@ function Window:_showCloseConfirm()
 
 	self._confirming = true
 	if not State.LowPerformance then
-		cardScale.Scale = 0.82
-		card.Position = UDim2.new(0.5, 0, 0.5, 14)
+		cardScale.Scale = 0.95
+		card.Position = UDim2.new(0.5, 0, 0.5, 8)
 		card.GroupTransparency = 1
-		tween(overlay, Anim.Slow, { BackgroundTransparency = 0.45 })
-		tween(card, Anim.Slow, { GroupTransparency = 0, Position = UDim2.fromScale(0.5, 0.5) }, Enum.EasingStyle.Back)
-		tween(cardScale, Anim.Slow, { Scale = 1 }, Enum.EasingStyle.Back)
+		tween(overlay, Anim.Normal, { BackgroundTransparency = 0.55 })
+		tween(card, Anim.Normal, { GroupTransparency = 0, Position = UDim2.fromScale(0.5, 0.5) })
+		tween(cardScale, Anim.Normal, { Scale = 1 })
 	else
-		overlay.BackgroundTransparency = 0.45
+		overlay.BackgroundTransparency = 0.55
 		card.GroupTransparency = 0
 		cardScale.Scale = 1
 	end
@@ -7438,136 +7276,21 @@ function AetherUI.CreateWindow(config)
 
 	local root = create("CanvasGroup", {
 		Name = "Window", AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0.5, 10), Size = self:_getSize(),
-		BackgroundColor3 = Theme.Background, BackgroundTransparency = Glass.Window, GroupTransparency = 1, Parent = gui,
+		Position = UDim2.new(0.5, 0, 0.5, 8), Size = self:_getSize(),
+		BackgroundColor3 = Theme.Background, BackgroundTransparency = 0, GroupTransparency = 1, Parent = gui,
 	})
-	addCorner(root, 14)
-	-- Animacao de abertura: escala 0.85 -> 1 + fade-in via GroupTransparency
-	local rootScale = create("UIScale", { Scale = 0.85, Parent = root })
+	addCorner(root, Radius.Window)
+	addStroke(root, Theme.Stroke, 0, 1)
+	local rootScale = create("UIScale", { Scale = 0.96, Parent = root })
 	self._root = root
 	self._scale = rootScale
-	self._shadow = attachShadow(root, gui, 14, rootScale, self._connections)
-
-	local border = create("Frame", {
-		Name = "Border", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(1, 1),
-		Size = UDim2.new(1, -2, 1, -2), ZIndex = 10, Active = false, Parent = root,
-	})
-	addCorner(border, 13)
-	local borderStroke = addStroke(border, Theme.White, 0.45, 1)
-	create("UIGradient", {
-		Rotation = 45,
-		Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0),
-			NumberSequenceKeypoint.new(0.5, 0.75),
-			NumberSequenceKeypoint.new(1, 0.35),
-		}),
-		Parent = borderStroke,
-	})
-
-	local borderInner = create("Frame", {
-		Name = "BorderInner", BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(1, 1),
-		Size = UDim2.new(1, -2, 1, -2), ZIndex = 10, Active = false, Parent = root,
-	})
-	addCorner(borderInner, 12)
-	local innerStroke = addStroke(borderInner, Theme.White, 0.93, 1)
-
-	-- Textura de luas caindo em loop (ZIndex 0: atras de todos os componentes).
-	local moonLayer = create("Frame", {
-		Name = "MoonLayer", BackgroundTransparency = 1, ClipsDescendants = true,
-		Size = UDim2.fromScale(1, 1), ZIndex = 0, Active = false, Parent = root,
-	})
-	self._moonLayer = moonLayer
-	local moons = {}
-	local moonCount = 20
-	local moonRng = Random.new(1307)
-	for i = 1, moonCount do
-		local size = moonRng:NextInteger(16, 34)
-		local image = create("ImageLabel", {
-			Name = "Moon", AnchorPoint = Vector2.new(0.5, 0), BackgroundTransparency = 1,
-			Size = UDim2.fromOffset(size, size), Image = Assets.Moon,
-			ImageColor3 = accent(), ImageTransparency = 1, ZIndex = 0,
-			Rotation = moonRng:NextInteger(-25, 25), Parent = moonLayer,
-		})
-		table.insert(moons, {
-			Image = image, Size = size,
-			X = math.clamp((i - 0.5) / moonCount + moonRng:NextNumber(-0.025, 0.025), 0.02, 0.98),
-			Speed = moonRng:NextNumber(0.03, 0.075),
-			Phase = (i * 0.618034) % 1,
-			Sway = moonRng:NextNumber(0.004, 0.012),
-			SwayRate = moonRng:NextNumber(0.4, 1),
-			Base = moonRng:NextNumber(0.55, 0.72),
-		})
-	end
-	self._moons = moons
-	-- Luas: Heartbeat SO existe com a janela visivel (desconecta ao minimizar /
-	-- ocultar / modo baixo desempenho). 30 Hz (20 Hz se o FPS cair): o
-	-- movimento e lento (< 1 px por passo), entao continua fluido e gasta
-	-- metade do processamento. Propriedades so sao reescritas se mudaram.
-	local moonTime, moonAccum, smoothDt = 0, 0, 1 / 60
-	local moonConn
-	self._setMoonsRunning = function(run)
-		if run then
-			if moonConn then return end
-			moonAccum = 0
-			moonConn = RunService.Heartbeat:Connect(function(dt)
-				smoothDt = smoothDt * 0.92 + dt * 0.08
-				moonAccum += dt
-				local stepRate = (SmartPerf.Enabled and SmartPerf.Stress >= 0.45) and 0.06
-					or (smoothDt > 0.026 and 0.05 or 0.0333)
-				if moonAccum < stepRate then return end
-				moonTime += moonAccum
-				moonAccum = 0
-				for _, moon in ipairs(moons) do
-					local y = (moon.Phase + moonTime * moon.Speed) % 1
-					local fade = math.clamp(math.min(y, 1 - y) * 7, 0, 1)
-					local image = moon.Image
-					if fade <= 0 then
-						if moon.LastT ~= 1 then image.ImageTransparency = 1; moon.LastT = 1 end
-					else
-						image.Position = UDim2.new(
-							moon.X + math.sin(moonTime * moon.SwayRate + moon.Phase * 6.28) * moon.Sway, 0,
-							y, -moon.Size * (1 - y)
-						)
-						local transparency = 1 - (1 - moon.Base) * fade
-						if math.abs(transparency - (moon.LastT or 2)) > 0.012 then
-							image.ImageTransparency = transparency
-							moon.LastT = transparency
-						end
-					end
-				end
-			end)
-		elseif moonConn then
-			moonConn:Disconnect(); moonConn = nil
-		end
-	end
-	table.insert(self._connections, { Disconnect = function() self._setMoonsRunning(false) end })
-
-	local glassSheen = create("Frame", {
-		Name = "GlassSheen", BackgroundColor3 = Theme.White,
-		Size = UDim2.fromScale(1, 1), ZIndex = 0, Active = false, Parent = root,
-	})
-	addCorner(glassSheen, 14)
-	create("UIGradient", {
-		Rotation = 55,
-		Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.88),
-			NumberSequenceKeypoint.new(0.5, 0.97),
-			NumberSequenceKeypoint.new(1, 1),
-		}),
-		Parent = glassSheen,
-	})
+	self._shadow = attachShadow(root, gui, Radius.Window, rootScale, self._connections)
 
 	local titleBar = create("Frame", {
 		Name = "TitleBar", Size = UDim2.new(1, 0, 0, m.Title),
-		BackgroundColor3 = Theme.Sidebar, BackgroundTransparency = Glass.Bar, Parent = root,
+		BackgroundColor3 = Theme.Sidebar, BackgroundTransparency = 0, Parent = root,
 	})
 	self._titleBar = titleBar
-	create("Frame", {
-		Name = "TopShine", BackgroundColor3 = Theme.White,
-		BackgroundTransparency = 0.9, Size = UDim2.new(1, 0, 0, 1), Parent = titleBar,
-	})
 	local titleLabel = create("TextLabel", {
 		Name = "Title", BackgroundTransparency = 1,
 		Text = tostring(config.Title or "AetherUI"),
@@ -7577,15 +7300,15 @@ function AetherUI.CreateWindow(config)
 	})
 	self._titleLabel = titleLabel
 
-	-- Icone circular (fundo preto) ao lado do titulo; contorno/icone seguem a AccentColor.
+	-- Emblema estrutural ao lado do titulo; fundo neutro elevado e icone na AccentColor.
 	local titleBadge = create("Frame", {
 		Name = "LogoBadge", AnchorPoint = Vector2.new(0, 0.5),
 		Position = UDim2.new(0, 6 + m.TitleButton + 8, 0.5, 0),
 		Size = UDim2.fromOffset(m.TitleButton, m.TitleButton),
-		BackgroundColor3 = Theme.Black, Parent = titleBar,
+		BackgroundColor3 = Theme.SurfaceHigh, Parent = titleBar,
 	})
-	addCornerScale(titleBadge, 0.5)
-	local titleBadgeStroke = addStroke(titleBadge, accentLight(), 0.35, 1.5)
+	addCorner(titleBadge, Radius.Control)
+	addStroke(titleBadge, Theme.Stroke, 0, 1)
 	local titleBadgeIcon = create("ImageLabel", {
 		Name = "Logo", AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
@@ -7599,20 +7322,6 @@ function AetherUI.CreateWindow(config)
 		Position = UDim2.new(0, 0, 1, 0),
 		Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = Theme.Divider, Parent = titleBar,
 	})
-	local accentLine = create("Frame", {
-		Name = "AccentLine", AnchorPoint = Vector2.new(0, 1),
-		Position = UDim2.new(0, 0, 1, 0),
-		Size = UDim2.new(1, 0, 0, 1),
-		BackgroundColor3 = accent(), Parent = titleBar,
-	})
-	local accentGradient = create("UIGradient", {
-		Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 1),
-			NumberSequenceKeypoint.new(0.5, 0.15),
-			NumberSequenceKeypoint.new(1, 1),
-		}), Parent = accentLine,
-	})
-	table.insert(self._gradients, accentGradient)
 
 	local function makeTitleButton(iconName, hoverColor, hoverIconColor, restColor)
 		local button = create("TextButton", {
@@ -7622,7 +7331,7 @@ function AetherUI.CreateWindow(config)
 			AutoButtonColor = false, Text = "",
 			ClipsDescendants = true, Parent = titleBar,
 		})
-		addCorner(button, 8)
+		addCorner(button, Radius.Control)
 		local buttonScale = create("UIScale", { Parent = button })
 		local icon = createIcon(iconName, button, m.Icon - 2, Theme.SubText)
 		icon.Instance.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -7637,17 +7346,10 @@ function AetherUI.CreateWindow(config)
 			tween(buttonScale, Anim.Fast, { Scale = 1 })
 		end)
 		button.MouseButton1Down:Connect(function()
-			tween(buttonScale, Anim.Micro, { Scale = 0.85 })
+			tween(buttonScale, Anim.Micro, { Scale = 0.92 })
 		end)
 		button.MouseButton1Up:Connect(function()
-			tween(buttonScale, Anim.Spring, { Scale = 1 }, Enum.EasingStyle.Back)
-		end)
-		button.InputBegan:Connect(function(input)
-			if not isPointer(input) then return end
-			local off = detectPointerOffset(input, button)
-			local rel = pointerPosition(input, off) - button.AbsolutePosition
-			spawnRipple(button, UDim2.fromOffset(math.floor(rel.X), math.floor(rel.Y)),
-				hoverIconColor, math.max(button.AbsoluteSize.X, 1) * 2.2)
+			tween(buttonScale, Anim.Fast, { Scale = 1 })
 		end)
 		return button, icon
 	end
@@ -7676,7 +7378,7 @@ function AetherUI.CreateWindow(config)
 	self._body = body
 
 	local sidebar = create("Frame", {
-		Name = "Sidebar", BackgroundColor3 = Theme.Sidebar, BackgroundTransparency = Glass.Side,
+		Name = "Sidebar", BackgroundColor3 = Theme.Sidebar, BackgroundTransparency = 0,
 		ClipsDescendants = true, Size = UDim2.new(0, m.SideWidth, 1, 0), Parent = body,
 	})
 	self._sidebar = sidebar
@@ -7702,32 +7404,16 @@ function AetherUI.CreateWindow(config)
 		Size = UDim2.new(1, -8, 0, 1), Visible = false, Parent = list,
 	})
 	self._highlight = create("Frame", {
-		Name = "Highlight", BackgroundColor3 = accentSoft(0.18),
+		Name = "Highlight", BackgroundColor3 = accentSurface(0.16), BackgroundTransparency = 0,
 		Size = UDim2.new(1, 0, 0, m.SideRow), ZIndex = 1, Visible = false, Parent = list,
 	})
-	addCorner(self._highlight, 10)
-	self._highlightStroke = addStroke(self._highlight, accent(), 0.82, 1)
-	local highlightGradient = addGradient(self._highlight, NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0.55),
-		NumberSequenceKeypoint.new(0.7, 0.85),
-		NumberSequenceKeypoint.new(1, 1),
-	}), 0)
-	table.insert(self._gradients, highlightGradient)
-	self._indicatorGlow = create("Frame", {
-		Name = "IndicatorGlow", BackgroundColor3 = accent(),
-		BackgroundTransparency = 0.82, Size = UDim2.fromOffset(7, 16),
-		ZIndex = 2, Visible = false, Parent = list,
-	})
-	addCornerScale(self._indicatorGlow, 0.5)
+	addCorner(self._highlight, Radius.Card)
+	self._highlightStroke = addStroke(self._highlight, accentBorder(0.4), 0, 1)
 	self._indicator = create("Frame", {
-		Name = "Indicator", BackgroundColor3 = accent(),
-		Size = UDim2.fromOffset(3, 12), ZIndex = 3, Visible = false, Parent = list,
+		Name = "Indicator", BackgroundColor3 = accent(), BackgroundTransparency = 0,
+		Size = UDim2.fromOffset(3, 14), ZIndex = 3, Visible = false, Parent = list,
 	})
 	addCornerScale(self._indicator, 0.5)
-	local indicatorGradient = addGradient(self._indicator, NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 1),
-	}), 0)
-	table.insert(self._gradients, indicatorGradient)
 
 	local content = create("Frame", {
 		Name = "Content", BackgroundTransparency = 1, ClipsDescendants = true,
@@ -7741,6 +7427,11 @@ function AetherUI.CreateWindow(config)
 		TextColor3 = Theme.Text, TextXAlignment = Enum.TextXAlignment.Left,
 		TextTruncate = Enum.TextTruncate.AtEnd, Parent = content,
 	})
+	self._headerDivider = create("Frame", {
+		Name = "HeaderDivider", BackgroundColor3 = Theme.Divider,
+		Position = UDim2.fromOffset(m.Pad + 4, m.Header + 10),
+		Size = UDim2.new(1, -(m.Pad * 2 + 8), 0, 1), Parent = content,
+	})
 	self._pages = create("Frame", {
 		Name = "Pages", BackgroundTransparency = 1, ClipsDescendants = true, Parent = content,
 	})
@@ -7748,13 +7439,13 @@ function AetherUI.CreateWindow(config)
 	-- Barra de pesquisa: fica ACIMA das abas (filha do body, ZIndex alto) e a
 	-- lista de abas comeca logo abaixo dela, entao nunca ha sobreposicao.
 	local searchBar = create("Frame", {
-		Name = "SearchBar", BackgroundColor3 = Theme.Element, BackgroundTransparency = Glass.Element,
+		Name = "SearchBar", BackgroundColor3 = Theme.BackgroundDeep, BackgroundTransparency = 0,
 		Position = UDim2.fromOffset(m.SidePad, 6),
 		Size = UDim2.fromOffset(m.SideWidth - m.SidePad * 2, m.Compact and 26 or 28),
 		ClipsDescendants = true, ZIndex = 20, Parent = body,
 	})
-	addCorner(searchBar, 8)
-	local searchStroke = addStroke(searchBar, Theme.StrokeSoft, 0.4, 1)
+	addCorner(searchBar, Radius.Card)
+	local searchStroke = addStroke(searchBar, Theme.StrokeSoft, 0, 1)
 	local searchIcon = createIcon("search", searchBar, 12, Theme.Muted)
 	if searchIcon then
 		searchIcon.Instance.AnchorPoint = Vector2.new(0, 0.5)
@@ -7789,17 +7480,17 @@ function AetherUI.CreateWindow(config)
 	self._searchBox = searchBox
 
 	local searchPopup = create("Frame", {
-		Name = "SearchResults", BackgroundColor3 = Theme.Surface, BackgroundTransparency = Glass.Popup,
+		Name = "SearchResults", BackgroundColor3 = Theme.Surface, BackgroundTransparency = 0,
 		Visible = false, ClipsDescendants = true, ZIndex = 21, Parent = body,
 	})
-	addCorner(searchPopup, 10)
-	addStroke(searchPopup, Theme.Stroke, 0.25, 1)
+	addCorner(searchPopup, Radius.Popup)
+	addStroke(searchPopup, Theme.Stroke, 0, 1)
 	local searchScroll = create("ScrollingFrame", {
 		Name = "List", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1),
 		CanvasSize = UDim2.new(0, 0, 0, 0),
 		ScrollingDirection = Enum.ScrollingDirection.Y,
-		ScrollBarThickness = 3, ScrollBarImageColor3 = accent(),
-		ScrollBarImageTransparency = 0.4, Parent = searchPopup,
+		ScrollBarThickness = 2, ScrollBarImageColor3 = accent(),
+		ScrollBarImageTransparency = 0.25, Parent = searchPopup,
 	})
 	addPadding(searchScroll, 4, 4, 4, 4)
 	local searchListLayout = create("UIListLayout", {
@@ -7821,7 +7512,7 @@ function AetherUI.CreateWindow(config)
 	searchBox.Focused:Connect(function()
 		self._searchFocused = true
 		searchHit.Visible = false
-		tween(searchStroke, Anim.Fast, { Color = accent(), Transparency = 0.2 })
+		tween(searchStroke, Anim.Fast, { Color = accent(), Transparency = 0 })
 		self:_layoutSearch(true)
 		self:_renderSearchResults(searchBox.Text)
 	end)
@@ -7829,7 +7520,7 @@ function AetherUI.CreateWindow(config)
 		self._searchFocused = false
 		searchHit.Visible = true
 		if searchBox.Text == "" then
-			tween(searchStroke, Anim.Fast, { Color = Theme.StrokeSoft, Transparency = 0.4 })
+			tween(searchStroke, Anim.Fast, { Color = Theme.StrokeSoft, Transparency = 0 })
 		end
 		self:_layoutSearch(true)
 		local first = self._searchResults and self._searchResults[1]
@@ -7848,27 +7539,27 @@ function AetherUI.CreateWindow(config)
 			m.Ball
 		),
 		Size = UDim2.fromOffset(m.Ball, m.Ball),
-		BackgroundColor3 = Theme.Black, BackgroundTransparency = Glass.Ball, AutoButtonColor = false,
+		BackgroundColor3 = Theme.Sidebar, BackgroundTransparency = 0, AutoButtonColor = false,
 		Text = "", Visible = false, Parent = gui,
 	})
 	addCornerScale(ball, 0.5)
 	local ballIcon = create("ImageLabel", {
 		Name = "Logo", AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromScale(0.62, 0.62), BackgroundTransparency = 1,
+		Size = UDim2.fromScale(0.6, 0.6), BackgroundTransparency = 1,
 		Image = Assets.Logo, ImageColor3 = accentLight(),
 		ScaleType = Enum.ScaleType.Fit, Active = false, Parent = ball,
 	})
 	self._ballStroke = create("UIStroke", {
 		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-		Color = accentLight(), Transparency = 0.7, Thickness = 2, Parent = ball,
+		Color = accentBorder(0.65), Transparency = 0, Thickness = 1.5, Parent = ball,
 	})
 	self._ball = ball
 	self._ballScale = create("UIScale", { Scale = 0, Parent = ball })
 
 	ball.MouseEnter:Connect(function()
 		if self._state == "Minimized" then
-			tween(self._ballScale, Anim.Fast, { Scale = 1.08 })
+			tween(self._ballScale, Anim.Fast, { Scale = 1.05 })
 		end
 	end)
 	ball.MouseLeave:Connect(function()
@@ -7889,17 +7580,12 @@ function AetherUI.CreateWindow(config)
 	})
 
 	self:_onAccent(function(animate)
-		setProps(self._highlight, { BackgroundColor3 = accentSoft(0.18) }, animate, Anim.Normal)
-		setProps(self._highlightStroke, { Color = accent() }, animate, Anim.Normal)
+		setProps(self._highlight, { BackgroundColor3 = accentSurface(0.16) }, animate, Anim.Normal)
+		setProps(self._highlightStroke, { Color = accentBorder(0.4) }, animate, Anim.Normal)
 		setProps(self._indicator, { BackgroundColor3 = accent() }, animate, Anim.Normal)
-		if self._indicatorGlow then setProps(self._indicatorGlow, { BackgroundColor3 = accent() }, animate, Anim.Normal) end
-		accentLine.BackgroundColor3 = accent()
 		ballIcon.ImageColor3 = accentLight()
-		self._ballStroke.Color = accentLight()
+		self._ballStroke.Color = accentBorder(0.65)
 		titleBadgeIcon.ImageColor3 = accentLight()
-		titleBadgeStroke.Color = accentLight()
-		for _, moon in ipairs(self._moons) do moon.Image.ImageColor3 = accent() end
-		setProps(innerStroke, { Color = Theme.White }, animate, Anim.Normal)
 		setProps(searchStroke, { Color = (searchBox.Text ~= "" or self._searchFocused) and accent() or Theme.StrokeSoft }, animate, Anim.Normal)
 		self._searchScroll.ScrollBarImageColor3 = accent()
 	end)
@@ -7922,14 +7608,14 @@ function AetherUI.CreateWindow(config)
 	end))
 	table.insert(Windows, self)
 
-	-- Animacao fixa de abertura: Fade + Slide + Scale
+	-- Animacao fixa de abertura: Fade + Slide sutil + Scale
 	if not State.LowPerformance then
 		root.GroupTransparency = 1
-		rootScale.Scale = 0.86
-		root.Position = UDim2.new(0.5, 0, 0.5, 14)
-		tween(root, Anim.Slow + 0.1, { GroupTransparency = 0, Position = UDim2.new(0.5, 0, 0.5, 0) })
-		tween(rootScale, Anim.Slow + 0.15, { Scale = 1 }, Enum.EasingStyle.Back)
-		task.delay(Anim.Slow + 0.2, function()
+		rootScale.Scale = 0.96
+		root.Position = UDim2.new(0.5, 0, 0.5, 8)
+		tween(root, Anim.Normal, { GroupTransparency = 0, Position = UDim2.new(0.5, 0, 0.5, 0) })
+		tween(rootScale, Anim.Normal, { Scale = 1 })
+		task.delay(Anim.Normal + 0.04, function()
 			if self._state == "Opening" then self:_setState("Open") end
 		end)
 	else
